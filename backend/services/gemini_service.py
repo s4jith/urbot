@@ -150,10 +150,11 @@ Rules:
 2) Use resume context for relevance — reference the candidate's actual background where useful.
 3) Do not repeat or paraphrase excluded_questions.
 4) Keep questions concise and practical.
-5) Make the set diverse: use different styles (scenario, debugging, trade-off, implementation, testing).
+5) Make the set diverse: use different styles (scenario, trade-off, conceptual explanation, thought process).
 6) Do not prefix with numbering like "Question 1:".
 7) Avoid generic repeats like "Explain your hands-on experience" for every question.
 8) Strictly respect the candidate level guidance above when choosing difficulty.
+9) VOICE INTERVIEW — CRITICAL: Never ask the candidate to write code, implement a function, write SQL, draw a diagram, or produce any written/visual output. All questions must be answerable by speaking only. Use phrasing like "How would you approach...", "Explain how...", "Walk me through..." instead.
 
 Return ONLY valid JSON array with objects:
 - question (string)
@@ -240,9 +241,10 @@ Rules:
 3) Do not repeat/paraphrase excluded_questions.
 4) Score should reflect conceptual correctness, not verbosity.
 5) If same_topic_streak is 2 or more, avoid another same-topic follow-up unless truly critical.
-6) Ask in realistic live-interview style (specific scenario, debugging, trade-off, design decision), not generic textbook phrasing.
+6) Ask in realistic live-interview style (specific scenario, trade-off, conceptual explanation), not generic textbook phrasing.
 7) Do not prefix numbering like "Question 4:".
 8) Avoid repeating the previous follow-up wording pattern.
+9) VOICE INTERVIEW — CRITICAL: Never ask the candidate to write code, implement a function, write SQL, draw a diagram, or produce any written/visual output. All questions must be answerable by speaking only. Use phrasing like "How would you approach...", "Explain how...", "Walk me through..." instead.
 
 Return ONLY valid JSON object:
 {{
@@ -323,6 +325,7 @@ Rules:
 1) Stay in topic scope only.
 2) Build on candidate weak points from qa_pairs.
 3) Do not repeat/paraphrase excluded_questions.
+4) VOICE INTERVIEW — CRITICAL: Never ask the candidate to write code, implement a function, write SQL, draw a diagram, or produce any written/visual output. All questions must be answerable by speaking only. Use phrasing like "How would you approach...", "Explain how...", "Walk me through..." instead.
 
 Return ONLY valid JSON array with objects:
 - question (string)

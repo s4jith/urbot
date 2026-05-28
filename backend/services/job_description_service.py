@@ -158,7 +158,13 @@ async def get_job_description_for_user(user_id: str, jd_id: str) -> dict:
     except Exception as exc:
         raise ValueError("Invalid job description id") from exc
 
-    doc = await db[JOB_DESCRIPTIONS].find_one({"_id": oid, "user_id": user_id})
+    doc = await db[JOB_DESCRIPTIONS].find_one({
+        "_id": oid,
+        "$or": [
+            {"user_id": user_id},
+            {"owner_role": "admin"}
+        ]
+    })
     if not doc:
         raise ValueError("Job description not found")
     return str_objectid(doc)

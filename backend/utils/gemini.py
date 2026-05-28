@@ -24,6 +24,21 @@ _QUESTION_LANGUAGE_RULE = (
     "choose X over Y? How does X work internally?)\n"
     "  hard   = system design, debugging, optimization, or trade-off scenario "
     "(Design a system using X. Debug this problem. What are the trade-offs of X vs Y?)\n"
+    "VOICE INTERVIEW FORMAT — CRITICAL RULES (never violate these):\n"
+    "  - This is a SPOKEN, VOICE-ONLY interview. The candidate can only answer verbally.\n"
+    "  - NEVER ask the candidate to write code, write a function, implement an algorithm, "
+    "or produce any written output.\n"
+    "  - NEVER ask the candidate to draw, sketch, or create any diagram, flowchart, or "
+    "visual representation.\n"
+    "  - NEVER use prompts like 'Write a program...', 'Code the following...', "
+    "'Implement a function that...', 'Write the SQL query...', 'Draw a diagram...', "
+    "'Sketch the architecture...', or any phrasing that requires writing or drawing.\n"
+    "  - Instead, ask the candidate to EXPLAIN, DESCRIBE, WALK THROUGH, or DISCUSS "
+    "concepts verbally. For example: 'How would you approach...', "
+    "'Can you explain how...', 'Walk me through your thought process for...', "
+    "'What would your strategy be for...'\n"
+    "  - All questions must be answerable by speaking alone — no pen, paper, or "
+    "keyboard required.\n"
 )
 
 settings = get_settings()
@@ -568,6 +583,7 @@ Generate ONE interview question for this candidate. The question should:
 8. If Current Stage is "applied": ask practical usage or comparison questions (medium-level)
 9. If Current Stage is "deep": ask applied scenario, debugging, optimization, or trade-off questions only (hard-level)
 10. Once the foundation stage is done, never return to basic definition questions
+11. VOICE INTERVIEW — CRITICAL: Never ask the candidate to write code, implement a function, write SQL, draw a diagram, or produce any written/visual output. All questions must be answerable by speaking only.
 
 Return ONLY a JSON object with:
 - "question": the interview question text
@@ -647,6 +663,7 @@ Rules:
 5. If stage is "deep": ask scenario, debugging, optimization, or trade-off questions (hard-level).
 6. Rotate topics across skills to avoid repetitive focus.
 7. If a skill is a cluster label like "Deep Learning (CNN, LSTM)", ask about one concrete member skill.
+8. VOICE INTERVIEW — CRITICAL: Never ask the candidate to write code, implement a function, write SQL, draw a diagram, or produce any written/visual output. All questions must be answerable by speaking only. Use phrasing like "How would you approach...", "Explain how...", "Walk me through..." instead.
 
 Return ONLY valid JSON array with objects of shape:
 - "question": string
