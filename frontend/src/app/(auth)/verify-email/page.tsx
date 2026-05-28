@@ -7,7 +7,9 @@ import { Mail, Loader2, RefreshCw, CheckCircle } from "lucide-react";
 import api from "@/lib/api";
 import { toast } from "sonner";
 
-export default function VerifyEmailPage() {
+import { Suspense } from "react";
+
+function VerifyEmailComponent() {
   const router = useRouter();
   const params = useSearchParams();
   const emailParam = params.get("email") || "";
@@ -150,5 +152,17 @@ export default function VerifyEmailPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function VerifyEmailPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#F2F2F2] via-[#e8f0fb] to-[#d6e8f5] p-6">
+        <Loader2 className="animate-spin text-primary" size={32} />
+      </div>
+    }>
+      <VerifyEmailComponent />
+    </Suspense>
   );
 }

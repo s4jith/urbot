@@ -6,10 +6,7 @@ from utils.helpers import str_objectid
 from utils.skills import normalize_skill_list, cluster_skills
 from bson import ObjectId
 from services.job_description_service import (
-    create_job_description,
-    list_my_job_descriptions,
-    update_my_job_description,
-    delete_my_job_description,
+    list_admin_job_descriptions,
     parse_jd_from_file,
 )
 from services.group_test_service import (
@@ -131,8 +128,8 @@ async def update_resume_data(
 async def get_my_job_descriptions(
     current_user: dict = Depends(get_current_user),
 ):
-    """List current user's job descriptions."""
-    items = await list_my_job_descriptions(current_user["user_id"])
+    """List job descriptions (returns admin-created job descriptions for all users)."""
+    items = await list_admin_job_descriptions()
     return {"items": items}
 
 
@@ -141,19 +138,8 @@ async def create_my_job_description(
     request_data: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """Create a new job description for current user."""
-    try:
-        item = await create_job_description(
-            user_id=current_user["user_id"],
-            owner_role=current_user.get("role", "student"),
-            title=request_data.get("title"),
-            company=request_data.get("company"),
-            description=request_data.get("description"),
-            required_skills=request_data.get("required_skills"),
-        )
-        return item
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    """Disabled: Job descriptions can only be created by administrators."""
+    raise HTTPException(status_code=403, detail="Job descriptions can only be created by administrators.")
 
 
 @router.put("/job-descriptions/{jd_id}")
@@ -162,13 +148,8 @@ async def update_my_job_description_endpoint(
     request_data: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """Update a current user's job description."""
-    try:
-        item = await update_my_job_description(current_user["user_id"], jd_id, request_data)
-        return item
-    except ValueError as e:
-        status_code = 404 if "not found" in str(e).lower() else 400
-        raise HTTPException(status_code=status_code, detail=str(e))
+    """Disabled: Job descriptions can only be updated by administrators."""
+    raise HTTPException(status_code=403, detail="Job descriptions can only be updated by administrators.")
 
 
 @router.delete("/job-descriptions/{jd_id}")
@@ -176,11 +157,8 @@ async def delete_my_job_description_endpoint(
     jd_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    """Delete a current user's job description."""
-    success = await delete_my_job_description(current_user["user_id"], jd_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Job description not found")
-    return {"message": "Job description deleted"}
+    """Disabled: Job descriptions can only be deleted by administrators."""
+    raise HTTPException(status_code=403, detail="Job descriptions can only be deleted by administrators.")
 
 
 @router.post("/job-descriptions/parse-file")
@@ -188,26 +166,8 @@ async def parse_jd_file_for_user(
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user),
 ):
-    """Upload a JD file (PDF/DOCX/TXT) and extract structured fields via AI."""
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No file provided")
-
-    allowed_ext = {".pdf", ".doc", ".docx", ".txt"}
-    ext = "." + file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
-    if ext not in allowed_ext:
-        raise HTTPException(status_code=400, detail="Unsupported file type. Allowed: PDF, DOC, DOCX, TXT")
-
-    content = await file.read()
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large. Maximum 10MB")
-
-    try:
-        result = await parse_jd_from_file(file.filename, content)
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to parse JD file: {str(e)}")
+    """Disabled: Job description parsing is restricted to administrators."""
+    raise HTTPException(status_code=403, detail="Job description parsing is restricted to administrators.")
 
 
 # ─── Group Tests (student) ───────────────────────────────────────────────────

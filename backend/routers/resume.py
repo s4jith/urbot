@@ -16,15 +16,12 @@ async def upload_resume(
 
     allowed_types = [
         "application/pdf",
-        "text/plain",
-        "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ]
 
     if file.content_type not in allowed_types:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type '{file.content_type}'. Allowed: PDF, DOC, DOCX, TXT.",
+            detail=f"Unsupported file type '{file.content_type}'. Allowed: PDF Only.",
         )
 
     content = await file.read()

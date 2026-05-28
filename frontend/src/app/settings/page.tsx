@@ -10,8 +10,8 @@ import { Settings, Upload, User, Zap, CheckCircle, Loader2, FileUp, PencilLine, 
 import { PageSkeleton } from "@/components/Skeleton";
 import { toast } from "sonner";
 
-// Resume filename must be: {12 digits}_{name}.{ext}
-const RESUME_FILENAME_RE = /^(\d{12})_(.+)\.(pdf|doc|docx|txt)$/i;
+// Resume filename must be: {12 digits}_{name}.pdf
+const RESUME_FILENAME_RE = /^(\d{12})_(.+)\.pdf$/i;
 
 export default function SettingsPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -36,25 +36,9 @@ export default function SettingsPage() {
   const [savingData, setSavingData] = useState(false);
   const [voiceGender, setVoiceGender] = useState<SpeechVoiceGender>("female");
   const [savingVoice, setSavingVoice] = useState(false);
-  const [jobDescriptions, setJobDescriptions] = useState<JobDescription[]>([]);
-  const [loadingJd, setLoadingJd] = useState(false);
-  const [savingJd, setSavingJd] = useState(false);
-  const [editingJdId, setEditingJdId] = useState<string | null>(null);
-  const [jdForm, setJdForm] = useState({
-    title: "",
-    company: "",
-    description: "",
-    requiredSkillsText: "",
-  });
-
-  // JD input mode: "type" (manual) or "upload" (file)
-  const [jdInputMode, setJdInputMode] = useState<"type" | "upload">("type");
-  const [jdFileUploading, setJdFileUploading] = useState(false);
-  const jdFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchProfile();
-    fetchJobDescriptions();
   }, []);
 
   const fetchProfile = async () => {
@@ -107,126 +91,7 @@ export default function SettingsPage() {
     }
   };
 
-  const fetchJobDescriptions = async () => {
-    setLoadingJd(true);
-    try {
-      const { data } = await api.get("/profile/job-descriptions");
-      setJobDescriptions(data.items || []);
-    } catch (err) {
-      console.error("Failed to fetch job descriptions", err);
-    } finally {
-      setLoadingJd(false);
-    }
-  };
 
-  const resetJdForm = () => {
-    setEditingJdId(null);
-    setJdInputMode("type");
-    setJdForm({
-      title: "",
-      company: "",
-      description: "",
-      requiredSkillsText: "",
-    });
-    if (jdFileInputRef.current) jdFileInputRef.current.value = "";
-  };
-
-  const handleJdFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const allowedExts = [".pdf", ".doc", ".docx", ".txt"];
-    const ext = "." + file.name.split(".").pop()!.toLowerCase();
-    if (!allowedExts.includes(ext)) {
-      toast.error("Unsupported file type. Please upload PDF, DOC, DOCX, or TXT.");
-      return;
-    }
-
-    setJdFileUploading(true);
-    const formData = new FormData();
-    formData.append("file", file);
-    try {
-      const { data } = await api.post("/profile/job-descriptions/parse-file", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      setJdForm({
-        title: data.title || "",
-        company: data.company || "",
-        description: data.description || "",
-        requiredSkillsText: (data.required_skills || []).join(", "),
-      });
-      setJdInputMode("type"); // switch to type mode so user can review/edit the pre-filled form
-      toast.success("JD extracted — review and save below.");
-    } catch (err: any) {
-      toast.error(err.response?.data?.detail || "Failed to parse JD file");
-    } finally {
-      setJdFileUploading(false);
-      if (jdFileInputRef.current) jdFileInputRef.current.value = "";
-    }
-  };
-
-  const onEditJd = (item: JobDescription) => {
-    setEditingJdId(item.id);
-    setJdForm({
-      title: item.title || "",
-      company: item.company || "",
-      description: item.description || "",
-      requiredSkillsText: (item.required_skills || []).join(", "),
-    });
-  };
-
-  const saveJobDescription = async () => {
-    if (!jdForm.title.trim() || !jdForm.description.trim()) {
-      toast.error("Title and description are required");
-      return;
-    }
-    setSavingJd(true);
-    try {
-      const payload = {
-        title: jdForm.title.trim(),
-        company: jdForm.company.trim(),
-        description: jdForm.description.trim(),
-        required_skills: jdForm.requiredSkillsText
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
-      };
-
-      if (editingJdId) {
-        await api.put(`/profile/job-descriptions/${editingJdId}`, payload);
-      } else {
-        await api.post("/profile/job-descriptions", payload);
-      }
-
-      resetJdForm();
-      fetchJobDescriptions();
-    } catch (err: any) {
-      toast.error(err.response?.data?.detail || "Failed to save job description");
-    } finally {
-      setSavingJd(false);
-    }
-  };
-
-  const deleteJobDescription = async (id: string) => {
-    toast("Delete this job description?", {
-      description: "This action cannot be undone.",
-      action: {
-        label: "Delete",
-        onClick: async () => {
-          try {
-            await api.delete(`/profile/job-descriptions/${id}`);
-            if (editingJdId === id) {
-              resetJdForm();
-            }
-            fetchJobDescriptions();
-          } catch (err: any) {
-            toast.error(err.response?.data?.detail || "Failed to delete job description");
-          }
-        }
-      },
-      cancel: { label: "Cancel", onClick: () => {} }
-    });
-  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -334,156 +199,9 @@ export default function SettingsPage() {
             <h2 className="text-lg font-semibold mb-2">What you can manage here</h2>
             <div className="text-sm text-muted space-y-1">
               <p>1. Voice preference for interview audio (XTTS presets)</p>
-              <p>2. Job descriptions (create, edit, delete)</p>
-              <p>3. Resume upload and re-upload</p>
-              <p>4. Resume details (name, email, phone, location)</p>
-              <p>5. Skills used for interview personalization</p>
-            </div>
-          </div>
-
-          <div className="p-6 rounded-xl bg-card border border-border mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold">Job Descriptions</h2>
-              <button
-                onClick={resetJdForm}
-                className="px-3 py-1.5 bg-white/5 border border-border rounded-lg text-sm text-muted hover:text-white transition-colors"
-              >
-                New
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-              {/* JD Input Mode Toggle */}
-              <div className="md:col-span-2 flex gap-2 mb-1">
-                <button
-                  type="button"
-                  onClick={() => setJdInputMode("type")}
-                  className={`flex-1 py-2 rounded-lg text-sm font-semibold border transition-all ${jdInputMode === "type" ? "bg-primary text-white border-primary" : "bg-transparent text-muted border-border hover:border-primary/40"}`}
-                >
-                  <PencilLine className="inline-block w-3.5 h-3.5 mr-1.5 -mt-0.5" strokeWidth={1.75} /> Type manually
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setJdInputMode("upload")}
-                  className={`flex-1 py-2 rounded-lg text-sm font-semibold border transition-all ${jdInputMode === "upload" ? "bg-primary text-white border-primary" : "bg-transparent text-muted border-border hover:border-primary/40"}`}
-                >
-                  <FileText className="inline-block w-3.5 h-3.5 mr-1.5 -mt-0.5" strokeWidth={1.75} /> Upload file (AI extract)
-                </button>
-              </div>
-
-              {jdInputMode === "upload" ? (
-                <div className="md:col-span-2">
-                  <label className="block cursor-pointer">
-                    <div className="p-6 rounded-lg border-2 border-dashed border-border hover:border-primary/50 transition-colors text-center">
-                      {jdFileUploading ? (
-                        <div className="flex items-center justify-center gap-2">
-                          <Loader2 className="w-5 h-5 animate-spin text-muted" />
-                          <span className="text-sm text-muted">Extracting JD with AI…</span>
-                        </div>
-                      ) : (
-                        <>
-                          <FileUp className="w-6 h-6 text-muted mx-auto mb-2" />
-                          <p className="text-sm text-muted">Upload JD file — AI will extract title, description and skills</p>
-                          <p className="text-xs text-muted mt-1">PDF, DOC, DOCX, TXT (max 10MB)</p>
-                        </>
-                      )}
-                    </div>
-                    <input
-                      ref={jdFileInputRef}
-                      type="file"
-                      accept=".pdf,.doc,.docx,.txt"
-                      onChange={handleJdFileUpload}
-                      className="hidden"
-                      disabled={jdFileUploading}
-                    />
-                  </label>
-                </div>
-              ) : (
-                <>
-                  <input
-                    type="text"
-                    placeholder="JD title"
-                    value={jdForm.title}
-                    onChange={(e) => setJdForm((prev) => ({ ...prev, title: e.target.value }))}
-                  />
-                  <input
-                    type="text"
-                    placeholder="Company (optional)"
-                    value={jdForm.company}
-                    onChange={(e) => setJdForm((prev) => ({ ...prev, company: e.target.value }))}
-                  />
-                </>
-              )}
-            </div>
-
-            {jdInputMode === "type" && (
-              <>
-                <textarea
-                  rows={5}
-                  placeholder="Paste job description text"
-                  value={jdForm.description}
-                  onChange={(e) => setJdForm((prev) => ({ ...prev, description: e.target.value }))}
-                  className="mb-3"
-                />
-                <input
-                  type="text"
-                  placeholder="Required skills (comma separated)"
-                  value={jdForm.requiredSkillsText}
-                  onChange={(e) => setJdForm((prev) => ({ ...prev, requiredSkillsText: e.target.value }))}
-                />
-              </>
-            )}
-
-            <div className="mt-3 flex items-center gap-2">
-              <button
-                onClick={saveJobDescription}
-                disabled={savingJd}
-                className="px-3 py-1.5 bg-white text-black font-medium rounded-lg text-sm hover:bg-gray-200 transition-colors disabled:opacity-50"
-              >
-                {savingJd ? "Saving..." : editingJdId ? "Update JD" : "Save JD"}
-              </button>
-              {editingJdId && (
-                <button
-                  onClick={resetJdForm}
-                  className="px-3 py-1.5 bg-transparent text-sm text-muted hover:text-white transition-colors"
-                >
-                  Cancel Edit
-                </button>
-              )}
-            </div>
-
-            <div className="mt-5 space-y-3">
-              {loadingJd ? (
-                <p className="text-sm text-muted">Loading job descriptions...</p>
-              ) : jobDescriptions.length === 0 ? (
-                <p className="text-sm text-muted">No job descriptions yet. Add one to improve interview targeting.</p>
-              ) : (
-                jobDescriptions.map((item) => (
-                  <div key={item.id} className="p-4 rounded-lg border border-border bg-background">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-medium">{item.title}</p>
-                        <p className="text-xs text-muted mt-1">{item.company || "No company"}</p>
-                        <p className="text-xs text-muted mt-2 line-clamp-2">{item.description}</p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          onClick={() => onEditJd(item)}
-                          className="px-2 py-1 text-xs rounded border border-border hover:border-border-light"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => deleteJobDescription(item.id)}
-                          className="px-2 py-1 text-xs rounded border border-red-500/40 text-red-400 hover:bg-red-500/10"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
+              <p>2. Resume upload and re-upload</p>
+              <p>3. Resume details (name, email, phone, location)</p>
+              <p>4. Skills used for interview personalization</p>
             </div>
           </div>
 
@@ -590,7 +308,7 @@ export default function SettingsPage() {
               <p className="font-semibold mb-1">⚠️ Required filename format:</p>
               <p className="font-mono text-amber-300">{"<12-digit-reg-no>_<YourName>.pdf"}</p>
               <p className="mt-1 text-amber-400/80">Example: <span className="font-mono">714023200122_Name.pdf</span></p>
-              <p className="mt-1 text-amber-400/80">Allowed: PDF, DOC, DOCX, TXT</p>
+              <p className="mt-1 text-amber-400/80">Allowed: PDF Only</p>
             </div>
 
             <label className="block">
@@ -612,14 +330,14 @@ export default function SettingsPage() {
                       <p className="text-sm text-muted">
                         {profile?.resume ? "Upload a new resume" : "Choose a file to upload"}
                       </p>
-                      <p className="text-xs text-muted mt-1">PDF, DOC, DOCX, or TXT (max 5MB)</p>
+                      <p className="text-xs text-muted mt-1">PDF only (max 5MB)</p>
                     </>
                   )}
                 </div>
               </div>
               <input
                 type="file"
-                accept=".pdf,.doc,.docx,.txt"
+                accept=".pdf"
                 onChange={handleFileUpload}
                 className="hidden"
                 disabled={uploading}

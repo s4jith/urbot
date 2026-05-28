@@ -51,6 +51,7 @@ async def test_update_speech_settings_invalid_gender(client: AsyncClient, regist
 # ── Job Descriptions ──────────────────────────────────────────────────────────
 
 async def test_create_and_list_job_description(client: AsyncClient, registered_student):
+    # Student cannot create JDs anymore, check that it returns 403 Forbidden
     headers = auth_headers(registered_student["token"])
     create_res = await client.post("/profile/job-descriptions", json={
         "title": "Backend Engineer",
@@ -58,31 +59,33 @@ async def test_create_and_list_job_description(client: AsyncClient, registered_s
         "required_skills": ["Python", "FastAPI"],
         "company": "Acme Corp",
     }, headers=headers)
-    assert create_res.status_code == 200
+    assert create_res.status_code == 403
 
+    # But student can list JDs (which now returns admin-created JDs)
     list_res = await client.get("/profile/job-descriptions", headers=headers)
     assert list_res.status_code == 200
-    assert len(list_res.json()["items"]) == 1
 
 
 async def test_delete_job_description(client: AsyncClient, registered_student):
+    # Student cannot delete JDs anymore, check that it returns 403 Forbidden
     headers = auth_headers(registered_student["token"])
-    create_res = await client.post("/profile/job-descriptions", json={
-        "title": "To Delete", "description": "desc",
-    }, headers=headers)
-    jd_id = create_res.json()["id"]
-
-    del_res = await client.delete(f"/profile/job-descriptions/{jd_id}", headers=headers)
-    assert del_res.status_code == 200
-
-    list_res = await client.get("/profile/job-descriptions", headers=headers)
-    assert len(list_res.json()["items"]) == 0
+    del_res = await client.delete("/profile/job-descriptions/66042971279a0b1234567890", headers=headers)
+    assert del_res.status_code == 403
 
 
 # ── Resume upload ─────────────────────────────────────────────────────────────
 
 async def test_resume_upload_wrong_type(client: AsyncClient, registered_student):
-    """Upload a non-PDF/DOCX/TXT file — should be rejected."""
+    """Upload a non-PDF file (e.g. .docx or .exe) — should be rejected."""
+    # Test docx file (which was previously allowed but is now forbidden)
+    res_docx = await client.post(
+        "/resume/upload",
+        files={"file": ("resume.docx", b"PK\x03\x04", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+        headers=auth_headers(registered_student["token"]),
+    )
+    assert res_docx.status_code == 400
+
+    # Test exe file
     res = await client.post(
         "/resume/upload",
         files={"file": ("resume.exe", b"MZ\x90\x00", "application/octet-stream")},

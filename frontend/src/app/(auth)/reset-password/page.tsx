@@ -7,7 +7,9 @@ import { Lock, Loader2, Eye, EyeOff, CheckCircle } from "lucide-react";
 import api from "@/lib/api";
 import { toast } from "sonner";
 
-export default function ResetPasswordPage() {
+import { Suspense } from "react";
+
+function ResetPasswordComponent() {
   const router = useRouter();
   const params = useSearchParams();
   const token = params.get("token") || "";
@@ -146,5 +148,17 @@ export default function ResetPasswordPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#F2F2F2] via-[#e8f0fb] to-[#d6e8f5] p-6">
+        <Loader2 className="animate-spin text-primary" size={32} />
+      </div>
+    }>
+      <ResetPasswordComponent />
+    </Suspense>
   );
 }
