@@ -146,3 +146,73 @@ async def test_health_services(client: AsyncClient):
     assert "services" in data
     assert "mongodb" in data["services"]
     assert "redis" in data["services"]
+
+
+# ── Student Filter ────────────────────────────────────────────────────────────
+
+async def test_student_filter(client: AsyncClient, registered_admin, registered_student):
+    headers = auth_headers(registered_admin["token"])
+    
+    # 1. Create a Topic
+    topic_res = await client.post("/admin/topics", json={
+        "name": "Maths", "description": "Basic arithmetic"
+    }, headers=headers)
+    assert topic_res.status_code == 200
+    topic_id = topic_res.json()["id"]
+
+    # 2. Create a Group Test
+    gt_res = await client.post("/admin/group-tests", json={
+        "name": "General Aptitude",
+        "description": "Basic questions",
+        "topic_ids": [topic_id],
+        "max_attempts": 2
+    }, headers=headers)
+    assert gt_res.status_code == 200
+    gt_id = gt_res.json()["id"]
+
+    # 3. Create a Group Test Result directly in DB for registered student
+    db = get_db()
+    await db["group_test_results"].insert_one({
+        "group_test_id": gt_id,
+        "group_test_name": "General Aptitude",
+        "user_id": registered_student["user"]["id"],
+        "user_name": registered_student["user"]["name"],
+        "user_email": registered_student["user"]["email"],
+        "attempt_number": 1,
+        "topic_results": [
+            {
+                "topic_id": topic_id,
+                "topic_name": "Maths",
+                "session_id": "sess-123",
+                "status": "completed",
+                "overall_score": 85.0,
+                "total_questions": 10,
+                "completed_at": "2026-05-28T00:00:00Z"
+            }
+        ],
+        "overall_score": 85.0,
+        "status": "completed",
+        "started_at": "2026-05-28T00:00:00Z",
+        "completed_at": "2026-05-28T00:10:00Z",
+        "time_limit_minutes": 30
+    })
+
+    # 4. Call /admin/students/filter endpoint
+    filter_res = await client.post("/admin/students/filter", json={
+        "group_test_ids": [gt_id],
+        "jd_id": None,
+        "start_date": "2026-05-27",
+        "end_date": "2026-05-29",
+        "top_k": None,
+        "min_score": None,
+        "sort_fields": ["time"],
+        "sort_orders": ["desc"]
+    }, headers=headers)
+
+    assert filter_res.status_code == 200, f"Failed: {filter_res.text}"
+    res_data = filter_res.json()
+    assert res_data["group_test_name"] == "General Aptitude"
+    assert len(res_data["rows"]) == 1
+    assert res_data["rows"][0]["overall_score"] == 85.0
+    assert res_data["rows"][0]["user_id"] == registered_student["user"]["id"]
+

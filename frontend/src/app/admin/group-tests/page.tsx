@@ -281,7 +281,7 @@ export default function AdminGroupTestsPage() {
                   <label className="text-xs text-muted mb-1 flex items-center gap-1.5 block">
                     <Briefcase className="w-3.5 h-3.5" />
                     Link to Job Description
-                    <span className="text-muted-foreground font-normal">(optional — used for student ranking in Chatbot)</span>
+                    <span className="text-muted-foreground font-normal"></span>
                   </label>
                   {adminJDs.length === 0 ? (
                     <p className="text-xs text-muted-foreground">

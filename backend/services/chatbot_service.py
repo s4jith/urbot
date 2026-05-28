@@ -503,9 +503,9 @@ async def filter_students_structured(
     if start_dt or end_dt:
         date_filter: dict = {}
         if start_dt:
-            date_filter["$gte"] = start_dt
+            date_filter["$gte"] = start_dt.isoformat()
         if end_dt:
-            date_filter["$lt"] = end_dt
+            date_filter["$lt"] = end_dt.isoformat()
         results_filter["started_at"] = date_filter
 
     results_cursor = db[GROUP_TEST_RESULTS].find(results_filter)
