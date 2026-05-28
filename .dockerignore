@@ -1,0 +1,34 @@
+# Environment
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+env/
+inter/
+
+# Node / frontend (not needed for backend deploy)
+frontend/
+node_modules/
+
+# Uploads (runtime data)
+uploads/
+
+# Git
+.git/
+.gitignore
+
+# OS / IDE junk
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+backend/.env

@@ -1,0 +1,62 @@
+# Virtual Environments
+venv/
+.venv/
+backend/venv/
+backend/.venv/
+
+# Environment Variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+backend/.env
+frontend/.env.local
+
+# Dependency directories
+node_modules/
+frontend/node_modules/
+
+# Python Cache & Build Artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+backend/.pytest_cache/
+backend/__pycache__/
+backend/services/__pycache__/
+backend/routers/__pycache__/
+backend/models/__pycache__/
+backend/utils/__pycache__/
+backend/auth/__pycache__/
+
+# Next.js Build Output
+.next/
+frontend/.next/
+out/
+frontend/out/
+
+# Database / Storage
+db/
+uploads/
+backend/uploads/
+
+# Audio / Voice Samples & Large Binary Files
+voice_samples/
+voice_name_list_xtts.txt
+*.wav
+*.mp3
+*.ogg
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Sensitive Configs / Temp files
+superadmin.json
+backend/superadmin.json
+.vercel
+frontend/.vercel
+*.pem
+*.key
