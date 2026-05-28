@@ -91,6 +91,7 @@ async def create_group_test(
     time_limit_minutes: int | None,
     max_attempts: int,
     created_by: str,
+    jd_id: str | None = None,
     allowed_college_codes: list[str] | None = None,
     allowed_years: list[str] | None = None,
     allowed_dept_codes: list[str] | None = None,
@@ -115,6 +116,7 @@ async def create_group_test(
     doc = {
         "name": name.strip(),
         "description": (description or "").strip() or None,
+        "jd_id": jd_id or None,
         "topic_ids": topic_ids,
         "time_limit_minutes": time_limit_minutes,
         "max_attempts": max(1, int(max_attempts)),

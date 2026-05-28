@@ -7,6 +7,7 @@ import api from "@/lib/api";
 import { GroupTest, GroupTestResult } from "@/types";
 import { Topic } from "@/types";
 import { Department } from "@/types/admin";
+import { JobDescription } from "@/types";
 import {
   Layers,
   Plus,
@@ -20,6 +21,7 @@ import {
   X,
   BarChart3,
   UserCheck,
+  Briefcase,
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -37,6 +39,7 @@ export default function AdminGroupTestsPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [allUsers, setAllUsers] = useState<AdminUser[]>([]);
   const [joiningYears, setJoiningYears] = useState<string[]>([]);
+  const [adminJDs, setAdminJDs] = useState<JobDescription[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -49,6 +52,7 @@ export default function AdminGroupTestsPage() {
   const [form, setForm] = useState({
     name: "",
     description: "",
+    jd_id: "",
     topic_ids: [] as string[],
     time_limit_minutes: "",
     max_attempts: "1",
@@ -63,18 +67,20 @@ export default function AdminGroupTestsPage() {
 
   const fetchData = async () => {
     try {
-      const [groupRes, topicsRes, deptsRes, usersRes, yearsRes] = await Promise.all([
+      const [groupRes, topicsRes, deptsRes, usersRes, yearsRes, jdRes] = await Promise.all([
         api.get("/admin/group-tests"),
         api.get("/admin/topics"),
         api.get("/admin/departments"),
         api.get("/admin/users"),
         api.get("/admin/settings/joining-years"),
+        api.get("/admin/job-descriptions"),
       ]);
       setItems(groupRes.data.items || []);
       setTopics(topicsRes.data.topics || []);
       setDepartments(deptsRes.data?.items || []);
       setAllUsers(usersRes.data?.items || []);
       setJoiningYears(yearsRes.data?.years || []);
+      setAdminJDs(jdRes.data?.items || []);
     } catch (err) {
       console.error("Failed to load data", err);
     } finally {
@@ -87,7 +93,7 @@ export default function AdminGroupTestsPage() {
     setShowForm(false);
     setShowTargetSection(false);
     setAddStudentDept("");
-    setForm({ name: "", description: "", topic_ids: [], time_limit_minutes: "", max_attempts: "1", allowedDeptCodes: [], allowedYears: [], allowedUserIds: [] });
+    setForm({ name: "", description: "", jd_id: "", topic_ids: [], time_limit_minutes: "", max_attempts: "1", allowedDeptCodes: [], allowedYears: [], allowedUserIds: [] });
   };
 
   const editItem = (item: GroupTest) => {
@@ -95,6 +101,7 @@ export default function AdminGroupTestsPage() {
     setForm({
       name: item.name,
       description: item.description || "",
+      jd_id: item.jd_id || "",
       topic_ids: item.topic_ids || [],
       time_limit_minutes: item.time_limit_minutes ? String(item.time_limit_minutes) : "",
       max_attempts: String(item.max_attempts ?? 1),
@@ -132,6 +139,7 @@ export default function AdminGroupTestsPage() {
     const payload = {
       name: form.name.trim(),
       description: form.description.trim() || null,
+      jd_id: form.jd_id || null,
       topic_ids: form.topic_ids,
       time_limit_minutes: form.time_limit_minutes ? parseInt(form.time_limit_minutes) : null,
       max_attempts: parseInt(form.max_attempts) || 1,
@@ -268,6 +276,34 @@ export default function AdminGroupTestsPage() {
                   </div>
                 </div>
 
+                {/* JD Mapping */}
+                <div>
+                  <label className="text-xs text-muted mb-1 flex items-center gap-1.5 block">
+                    <Briefcase className="w-3.5 h-3.5" />
+                    Link to Job Description
+                    <span className="text-muted-foreground font-normal">(optional — used for student ranking in Chatbot)</span>
+                  </label>
+                  {adminJDs.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      No job descriptions found.{" "}
+                      <a href="/admin/job-descriptions" className="text-primary underline">Create a JD first.</a>
+                    </p>
+                  ) : (
+                    <select
+                      className="app-control"
+                      value={form.jd_id}
+                      onChange={(e) => setForm((p) => ({ ...p, jd_id: e.target.value }))}
+                    >
+                      <option value="">— No JD (unlinked) —</option>
+                      {adminJDs.map((jd) => (
+                        <option key={jd.id} value={jd.id}>
+                          {jd.title}{jd.company ? ` — ${jd.company}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
                 {/* Topic selector */}
                 <div>
                   <p className="text-xs text-muted mb-2">
@@ -327,7 +363,28 @@ export default function AdminGroupTestsPage() {
                     <div className="px-4 pb-4 space-y-5 border-t border-border/60">
                       {/* Department filter */}
                       <div className="pt-4">
-                        <p className="text-xs font-medium mb-2">Departments (3-digit code from reg_no)</p>
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-xs font-medium">Departments (3-digit code from reg_no)</p>
+                          {departments.length > 0 && (
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setForm((p) => ({ ...p, allowedDeptCodes: departments.map((d) => d.code) }))}
+                                className="text-xs text-primary hover:underline"
+                              >
+                                Select All
+                              </button>
+                              <span className="text-muted text-xs">·</span>
+                              <button
+                                type="button"
+                                onClick={() => setForm((p) => ({ ...p, allowedDeptCodes: [] }))}
+                                className="text-xs text-muted hover:text-white"
+                              >
+                                Uncheck All
+                              </button>
+                            </div>
+                          )}
+                        </div>
                         {departments.length === 0 ? (
                           <p className="text-xs text-muted-foreground">No departments defined. <a href="/admin/settings" className="text-primary underline">Add departments in Settings.</a></p>
                         ) : (
@@ -513,6 +570,15 @@ export default function AdminGroupTestsPage() {
                         >
                           {item.is_published ? "Published" : "Draft"}
                         </span>
+                        {item.jd_id && (() => {
+                          const jd = adminJDs.find((j) => j.id === item.jd_id);
+                          return jd ? (
+                            <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border border-blue-500/30 text-blue-400 bg-blue-500/8">
+                              <Briefcase className="w-3 h-3" />
+                              {jd.title}
+                            </span>
+                          ) : null;
+                        })()}
                       </div>
                       {item.description && (
                         <p className="text-xs text-muted mt-1">{item.description}</p>

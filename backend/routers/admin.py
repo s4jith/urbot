@@ -498,6 +498,7 @@ async def create_group_test_endpoint(
         result = await create_group_test(
             name=request.name,
             description=request.description,
+            jd_id=request.jd_id,
             topic_ids=request.topic_ids,
             time_limit_minutes=request.time_limit_minutes,
             max_attempts=request.max_attempts,

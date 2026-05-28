@@ -82,6 +82,7 @@ class RoleRequirementCreate(BaseModel):
 class GroupTestCreate(BaseModel):
     name: str
     description: Optional[str] = None
+    jd_id: Optional[str] = None
     topic_ids: List[str]
     time_limit_minutes: Optional[int] = None
     max_attempts: int = 1
@@ -93,6 +94,7 @@ class GroupTestCreate(BaseModel):
 class GroupTestUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    jd_id: Optional[str] = None
     topic_ids: Optional[List[str]] = None
     time_limit_minutes: Optional[int] = None
     max_attempts: Optional[int] = None

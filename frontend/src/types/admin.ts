@@ -104,6 +104,7 @@ export interface GroupTest {
   id: string;
   name: string;
   description?: string | null;
+  jd_id?: string | null;
   topic_ids: string[];
   topics: GroupTestTopic[];
   time_limit_minutes?: number | null;
