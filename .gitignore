@@ -60,3 +60,7 @@ backend/superadmin.json
 frontend/.vercel
 *.pem
 *.key
+
+
+# Voice models
+voice_samples
