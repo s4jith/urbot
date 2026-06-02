@@ -17,3 +17,5 @@ GROUP_TESTS = "group_tests"
 GROUP_TEST_RESULTS = "group_test_results"
 DEPARTMENTS = "departments"
 APP_SETTINGS = "app_settings"
+GEMINI_KEYS = "gemini_keys"
+

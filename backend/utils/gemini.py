@@ -52,75 +52,204 @@ settings = get_settings()
 _KEY_POOL: list[dict] = []
 _KEY_POOL_INDEX: int = 0
 _KEY_POOL_LOCK = threading.Lock()
+_RELOAD_LOCK = asyncio.Lock()
+_LAST_RELOAD_TIME = 0.0
+_RELOAD_INTERVAL = 60.0  # seconds
 
 
-def _init_key_pool() -> None:
-    """Build the key pool from GEMINI_API_KEY (primary) + GEMINI_API_KEYS (extras)."""
-    global _KEY_POOL
+async def reload_key_pool() -> None:
+    """Force reload the key pool from MongoDB, falling back to .env if empty."""
+    async with _RELOAD_LOCK:
+        await _reload_key_pool_unsafe()
+
+
+async def _reload_key_pool_unsafe() -> None:
+    """Reload the key pool without acquiring the reload lock."""
+    global _KEY_POOL, _LAST_RELOAD_TIME
     keys: list[str] = []
 
-    # Extra keys first so primary is used as last resort / first round-robin entry
-    extras = (getattr(settings, "GEMINI_API_KEYS", "") or "").strip()
-    if extras:
-        keys.extend([k.strip() for k in extras.split(",") if k.strip()])
+    # 1. Attempt to load from MongoDB
+    from database import get_db
+    db = get_db()
+    if db is not None:
+        try:
+            from models.collections import GEMINI_KEYS
+            cursor = db[GEMINI_KEYS].find({"is_active": True})
+            docs = await cursor.to_list(length=1000)
+            for doc in docs:
+                k = (doc.get("key") or "").strip()
+                if k and k not in keys:
+                    keys.append(k)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Could not load keys from MongoDB: %s", e)
 
-    primary = (settings.GEMINI_API_KEY or "").strip()
-    if primary and primary not in keys:
-        keys.append(primary)
+    # 2. Fallback to .env config if no keys loaded from DB
+    if not keys:
+        extras = (getattr(settings, "GEMINI_API_KEYS", "") or "").strip()
+        if extras:
+            keys.extend([k.strip() for k in extras.split(",") if k.strip() and k.strip() not in keys])
 
-    _KEY_POOL = [
-        {
-            "key": k,
-            "client": genai.Client(api_key=k),
-            "call_count": 0,
-            "rate_limited_until": 0.0,  # time.monotonic() deadline
-        }
-        for k in keys
-        if k
-    ]
+        primary = (settings.GEMINI_API_KEY or "").strip()
+        if primary and primary not in keys:
+            keys.append(primary)
+
+    new_pool = []
+    for k in keys:
+        if k:
+            import hashlib
+            key_id = hashlib.sha256(k.encode()).hexdigest()[:12]
+            new_pool.append({
+                "key": k,
+                "key_id": key_id,
+                "client": genai.Client(api_key=k),
+                "call_count": 0,
+                "rate_limited_until_mono": 0.0,  # Memory fallback
+            })
+
+    with _KEY_POOL_LOCK:
+        _KEY_POOL = new_pool
+    _LAST_RELOAD_TIME = time.monotonic()
 
 
-def _pick_key() -> dict:
-    """Return the next available key via round-robin, skipping rate-limited keys."""
-    global _KEY_POOL_INDEX
+async def _pick_key() -> dict:
+    """Return the next available key via Redis-coordinated round-robin."""
+    global _KEY_POOL
+    now_mono = time.monotonic()
+
+    # Dynamic reload check
+    if not _KEY_POOL or (now_mono - _LAST_RELOAD_TIME > _RELOAD_INTERVAL):
+        async with _RELOAD_LOCK:
+            # Double check inside the lock
+            if not _KEY_POOL or (time.monotonic() - _LAST_RELOAD_TIME > _RELOAD_INTERVAL):
+                await _reload_key_pool_unsafe()
+
     if not _KEY_POOL:
         raise RuntimeError("No Gemini API keys configured")
 
-    now = time.monotonic()
+    from database import get_redis
+    redis = get_redis()
+
+    if redis:
+        try:
+            # 1. Retrieve current index
+            rotation_idx = await redis.get("gemini:rotation_index")
+            idx = int(rotation_idx) if rotation_idx else 0
+            n = len(_KEY_POOL)
+
+            # 2. Find first clean key
+            for i in range(n):
+                cur_idx = (idx + i) % n
+                entry = _KEY_POOL[cur_idx]
+                key_id = entry["key_id"]
+
+                cooldown_key = f"gemini:key:{key_id}:cooldown"
+                rpd_key = f"gemini:key:{key_id}:rpd_limit_hit"
+
+                is_cooldown = await redis.exists(cooldown_key)
+                is_daily_limit = await redis.exists(rpd_key)
+
+                if not is_cooldown and not is_daily_limit:
+                    # Update index in Redis for next call
+                    next_idx = (cur_idx + 1) % n
+                    await redis.set("gemini:rotation_index", str(next_idx))
+                    entry["call_count"] = entry.get("call_count", 0) + 1
+                    return entry
+
+            # 3. Fallback: all keys blocked in Redis. Pick the one with the shortest cooldown TTL.
+            min_ttl = float('inf')
+            best_entry = _KEY_POOL[0]
+            for entry in _KEY_POOL:
+                key_id = entry["key_id"]
+                ttl = await redis.ttl(f"gemini:key:{key_id}:cooldown")
+                ttl = max(0, ttl)
+                if ttl < min_ttl:
+                    min_ttl = ttl
+                    best_entry = entry
+            return best_entry
+
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Redis error in key picker, falling back to memory: %s", e)
+
+    # 4. Memory fallback (if Redis is not connected/failed)
+    # We maintain a global _KEY_POOL_INDEX in memory as secondary fallback
+    global _KEY_POOL_INDEX
     n = len(_KEY_POOL)
     with _KEY_POOL_LOCK:
         for i in range(n):
-            idx = (_KEY_POOL_INDEX + i) % n
-            entry = _KEY_POOL[idx]
-            if entry["rate_limited_until"] <= now:
-                _KEY_POOL_INDEX = (idx + 1) % n
-                entry["call_count"] += 1
+            idx_mem = (_KEY_POOL_INDEX + i) % n
+            entry = _KEY_POOL[idx_mem]
+            if entry.get("rate_limited_until_mono", 0.0) <= now_mono:
+                _KEY_POOL_INDEX = (idx_mem + 1) % n
+                entry["call_count"] = entry.get("call_count", 0) + 1
                 return entry
-        # All keys temporarily rate-limited — return soonest-recovering one
-        return min(_KEY_POOL, key=lambda e: e["rate_limited_until"])
+        # All keys temporarily rate-limited in memory — return soonest-recovering one
+        return min(_KEY_POOL, key=lambda e: e.get("rate_limited_until_mono", 0.0))
 
 
-def _mark_key_rate_limited(entry: dict, retry_seconds: float = 65.0) -> None:
-    """Mark a key as unavailable for retry_seconds (one Gemini quota window)."""
+async def _mark_key_rate_limited(entry: dict, retry_seconds: float = 65.0, is_daily: bool = False) -> None:
+    """Mark a key as unavailable globally (Redis) and locally (Memory fallback)."""
+    key_id = entry["key_id"]
+    from database import get_redis
+    redis = get_redis()
+
+    if redis:
+        try:
+            if is_daily:
+                # Daily limit hit: block key for 24 hours
+                await redis.set(f"gemini:key:{key_id}:rpd_limit_hit", "1", ex=86400)
+            else:
+                # Transient limit hit: block key for retry_seconds
+                await redis.set(f"gemini:key:{key_id}:cooldown", "1", ex=int(retry_seconds))
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Failed to mark key rate limited in Redis: %s", e)
+
+    # Memory fallback tracking
     with _KEY_POOL_LOCK:
-        entry["rate_limited_until"] = time.monotonic() + retry_seconds
+        entry["rate_limited_until_mono"] = time.monotonic() + (24 * 3600 if is_daily else retry_seconds)
 
 
-def get_key_pool_status() -> list[dict]:
+async def get_key_pool_status() -> list[dict]:
     """Return pool health summary (for admin/debug endpoints)."""
-    now = time.monotonic()
-    return [
-        {
+    from database import get_redis
+    redis = get_redis()
+    status_list = []
+    now_mono = time.monotonic()
+    
+    for i, e in enumerate(_KEY_POOL):
+        key_id = e["key_id"]
+        rate_limited = False
+        recovers_in_s = 0.0
+        daily_limit_hit = False
+
+        if redis:
+            try:
+                cooldown_ttl = await redis.ttl(f"gemini:key:{key_id}:cooldown")
+                rpd_ttl = await redis.ttl(f"gemini:key:{key_id}:rpd_limit_hit")
+                if cooldown_ttl > 0:
+                    rate_limited = True
+                    recovers_in_s = float(cooldown_ttl)
+                if rpd_ttl > 0:
+                    daily_limit_hit = True
+            except Exception:
+                pass
+
+        if not rate_limited and e.get("rate_limited_until_mono", 0.0) > now_mono:
+            rate_limited = True
+            recovers_in_s = max(0.0, round(e["rate_limited_until_mono"] - now_mono, 1))
+
+        status_list.append({
             "index": i,
-            "call_count": e["call_count"],
-            "rate_limited": e["rate_limited_until"] > now,
-            "recovers_in_s": max(0.0, round(e["rate_limited_until"] - now, 1)),
-        }
-        for i, e in enumerate(_KEY_POOL)
-    ]
+            "key_id": key_id,
+            "masked_key": e["key"][:10] + "..." + e["key"][-10:] if len(e["key"]) > 20 else e["key"],
+            "rate_limited": rate_limited,
+            "daily_limit_hit": daily_limit_hit,
+            "recovers_in_s": recovers_in_s,
+        })
+    return status_list
 
-
-_init_key_pool()
 
 
 def _extract_response_text(response) -> str:
@@ -199,10 +328,21 @@ async def call_gemini(
 
     attempts = max(1, int(max_attempts or 1))
     for attempt in range(attempts):
-        key_entry = _pick_key()
+        key_entry = await _pick_key()
 
         for model_name in model_candidates:
             try:
+                try:
+                    key_index = _KEY_POOL.index(key_entry) + 1
+                except ValueError:
+                    key_index = 0
+                total_keys = len(_KEY_POOL)
+                import logging
+                logging.getLogger(__name__).info(
+                    "Calling Gemini (attempt %d/%d) using API Key %d/%d (Key ID: %s, Model: %s)",
+                    attempt + 1, attempts, key_index, total_keys, key_entry["key_id"], model_name
+                )
+
                 # Capture client at call-time to avoid closure issues during key rotation.
                 def _invoke(_client=key_entry["client"]):
                     return _client.models.generate_content(
@@ -238,8 +378,20 @@ async def call_gemini(
                     or "429" in message
                     or "quota" in message
                 ):
-                    _mark_key_rate_limited(key_entry)
-                    key_entry = _pick_key()
+                    is_daily = "per day" in message or "daily" in message
+                    limit_type = "Daily limit (RPD)" if is_daily else "Minute limit (RPM/TPM)"
+                    try:
+                        key_index = _KEY_POOL.index(key_entry) + 1
+                    except ValueError:
+                        key_index = 0
+                    total_keys = len(_KEY_POOL)
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "API Key %d/%d (Key ID: %s) hit 429 Rate Limit - Type: %s. Rotating key...",
+                        key_index, total_keys, key_entry["key_id"], limit_type
+                    )
+                    await _mark_key_rate_limited(key_entry, is_daily=is_daily)
+                    key_entry = await _pick_key()
                     continue
 
                 # Transient service errors: try next model candidate.

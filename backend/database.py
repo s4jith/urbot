@@ -46,6 +46,9 @@ async def connect_db():
     await db.answers.create_index("session_id")
     await db.questions.create_index("role_id")
     await db.jd_verifications.create_index([("user_id", 1), ("cache_key", 1)])
+    from models.collections import GEMINI_KEYS
+    await db[GEMINI_KEYS].create_index("key", unique=True)
+
 
     # Redis — explicit connection pool (max_connections=30 covers all workers).
     redis_client = aioredis.from_url(

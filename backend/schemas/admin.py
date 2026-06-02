@@ -173,3 +173,14 @@ class StudentFilterExportRequest(BaseModel):
     rows: List[dict]
     topic_columns: List[dict]
     group_test_name: str
+
+
+class GeminiKeyCreate(BaseModel):
+    key: str
+    description: Optional[str] = None
+
+
+class GeminiKeyUpdate(BaseModel):
+    is_active: Optional[bool] = None
+    description: Optional[str] = None
+

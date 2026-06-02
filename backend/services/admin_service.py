@@ -3,7 +3,7 @@ import json
 import re
 from datetime import datetime
 from database import get_db
-from models.collections import JOB_ROLES, ROLE_REQUIREMENTS, QUESTIONS, TOPICS, TOPIC_QUESTIONS, SESSIONS, USERS, RESULTS, RESUMES, SKILLS, ANSWERS, JOB_DESCRIPTIONS, DEPARTMENTS, APP_SETTINGS
+from models.collections import JOB_ROLES, ROLE_REQUIREMENTS, QUESTIONS, TOPICS, TOPIC_QUESTIONS, SESSIONS, USERS, RESULTS, RESUMES, SKILLS, ANSWERS, JOB_DESCRIPTIONS, DEPARTMENTS, APP_SETTINGS, GEMINI_KEYS
 from utils.helpers import utc_now, str_objectid, str_objectids
 from utils.gemini import call_gemini
 from utils.resume_text import extract_resume_text
@@ -711,3 +711,112 @@ async def set_joining_years(years: list) -> list:
     cleaned = [str(y).strip() for y in years if str(y).strip()]
     await set_app_setting("joining_years", cleaned)
     return cleaned
+
+
+# ─── Gemini Keys ───
+
+async def add_gemini_key(key: str, description: str = None) -> dict:
+    db = get_db()
+    key = (key or "").strip()
+    if not key:
+        raise ValueError("API Key is required")
+    # Clean check
+    existing = await db[GEMINI_KEYS].find_one({"key": key})
+    if existing:
+        raise ValueError("This API Key already exists in the database")
+
+    doc = {
+        "key": key,
+        "description": description,
+        "is_active": True,
+        "created_at": utc_now(),
+        "updated_at": utc_now(),
+    }
+    result = await db[GEMINI_KEYS].insert_one(doc)
+    doc["_id"] = result.inserted_id
+
+    # Notify key pool of change
+    from utils.gemini import reload_key_pool
+    await reload_key_pool()
+
+    # Mask key for return value
+    doc["key"] = key[:10] + "..." + key[-10:] if len(key) > 20 else key
+    return str_objectid(doc)
+
+
+async def list_gemini_keys(mask_keys: bool = True) -> list:
+    db = get_db()
+    from database import get_redis
+    redis = get_redis()
+    cursor = db[GEMINI_KEYS].find().sort("created_at", -1)
+    docs = await cursor.to_list(length=1000)
+    
+    import hashlib
+    for doc in docs:
+        key = doc.get("key") or ""
+        key_id = hashlib.sha256(key.encode()).hexdigest()[:12]
+        
+        # Redis status
+        rate_limited = False
+        recovers_in_s = 0.0
+        daily_limit_hit = False
+        
+        if redis:
+            try:
+                cooldown_ttl = await redis.ttl(f"gemini:key:{key_id}:cooldown")
+                rpd_ttl = await redis.ttl(f"gemini:key:{key_id}:rpd_limit_hit")
+                if cooldown_ttl > 0:
+                    rate_limited = True
+                    recovers_in_s = float(cooldown_ttl)
+                if rpd_ttl > 0:
+                    daily_limit_hit = True
+            except Exception:
+                pass
+                
+        doc["rate_limited"] = rate_limited
+        doc["daily_limit_hit"] = daily_limit_hit
+        doc["recovers_in_s"] = recovers_in_s
+        
+        if mask_keys and "key" in doc:
+            doc["key"] = key[:10] + "..." + key[-10:] if len(key) > 20 else key
+    return str_objectids(docs)
+
+
+
+async def update_gemini_key(key_id: str, is_active: bool | None = None, description: str | None = None) -> dict:
+    db = get_db()
+    update_data = {}
+    if is_active is not None:
+        update_data["is_active"] = is_active
+    if description is not None:
+        update_data["description"] = description
+
+    if not update_data:
+        raise ValueError("No fields to update")
+
+    update_data["updated_at"] = utc_now()
+    await db[GEMINI_KEYS].update_one({"_id": ObjectId(key_id)}, {"$set": update_data})
+    doc = await db[GEMINI_KEYS].find_one({"_id": ObjectId(key_id)})
+    if not doc:
+        raise ValueError("Gemini key not found")
+
+    # Notify key pool of change
+    from utils.gemini import reload_key_pool
+    await reload_key_pool()
+
+    if "key" in doc:
+        key = doc["key"]
+        doc["key"] = key[:10] + "..." + key[-10:] if len(key) > 20 else key
+    return str_objectid(doc)
+
+
+async def delete_gemini_key(key_id: str) -> bool:
+    db = get_db()
+    result = await db[GEMINI_KEYS].delete_one({"_id": ObjectId(key_id)})
+    if result.deleted_count > 0:
+        # Notify key pool of change
+        from utils.gemini import reload_key_pool
+        await reload_key_pool()
+        return True
+    return False
+

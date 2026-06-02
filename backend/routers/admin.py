@@ -10,6 +10,7 @@ from schemas.admin import (
     GroupTestCreate, GroupTestUpdate, GroupTestPublishUpdate,
     ChatbotQueryRequest, ChatbotExportRequest, ChatbotStudentUpdate,
     DepartmentCreate, MaintenanceModeUpdate, JoiningYearsUpdate,
+    GeminiKeyCreate, GeminiKeyUpdate,
 )
 from services.admin_service import (
     create_role, update_role, delete_role, list_roles,
@@ -22,6 +23,7 @@ from services.admin_service import (
     list_departments, create_department, delete_department,
     get_maintenance_status, set_maintenance_status,
     get_joining_years, set_joining_years,
+    add_gemini_key, list_gemini_keys, update_gemini_key, delete_gemini_key,
 )
 from services.job_description_service import (
     create_job_description,
@@ -746,3 +748,54 @@ async def set_joining_years_endpoint(
 ):
     years = await set_joining_years(request.years)
     return {"years": years}
+
+
+# ─── Gemini Keys ───
+
+@router.post("/gemini-keys")
+async def add_gemini_key_endpoint(
+    request: GeminiKeyCreate,
+    current_user: dict = Depends(require_role("admin")),
+):
+    try:
+        result = await add_gemini_key(key=request.key, description=request.description)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/gemini-keys")
+async def list_gemini_keys_endpoint(
+    current_user: dict = Depends(require_role("admin")),
+):
+    keys = await list_gemini_keys()
+    return {"keys": keys}
+
+
+@router.patch("/gemini-keys/{key_id}")
+async def update_gemini_key_endpoint(
+    key_id: str,
+    request: GeminiKeyUpdate,
+    current_user: dict = Depends(require_role("admin")),
+):
+    try:
+        result = await update_gemini_key(
+            key_id=key_id,
+            is_active=request.is_active,
+            description=request.description,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/gemini-keys/{key_id}")
+async def delete_gemini_key_endpoint(
+    key_id: str,
+    current_user: dict = Depends(require_role("admin")),
+):
+    success = await delete_gemini_key(key_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Gemini API Key not found")
+    return {"message": "Gemini API Key deleted"}
+
