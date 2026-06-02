@@ -114,19 +114,23 @@ async def _get_tts_model(model_name: str):
                     "Coqui TTS is not installed in the active Python environment"
                 ) from exc
 
-            gpu_pref = os.getenv("XTTS_USE_GPU", "auto").strip().lower()
-            use_gpu = False
-            if gpu_pref in {"1", "true", "yes", "on"}:
-                use_gpu = True
-            elif gpu_pref in {"0", "false", "no", "off"}:
+            # Only use GPU for the heavy XTTS model.
+            # Legacy fallback models (VITS/Tacotron) should always run on CPU to avoid device-side assert errors.
+            if model_name != XTTS_MODEL:
                 use_gpu = False
             else:
-                try:
-                    import torch
-
-                    use_gpu = bool(torch.cuda.is_available())
-                except Exception:
+                gpu_pref = os.getenv("XTTS_USE_GPU", "auto").strip().lower()
+                use_gpu = False
+                if gpu_pref in {"1", "true", "yes", "on"}:
+                    use_gpu = True
+                elif gpu_pref in {"0", "false", "no", "off"}:
                     use_gpu = False
+                else:
+                    try:
+                        import torch
+                        use_gpu = bool(torch.cuda.is_available())
+                    except Exception:
+                        use_gpu = False
 
             # TTS(..., gpu=...) is deprecated upstream. Load once, then move model.
             tts = TTS(model_name=model_name, progress_bar=False)
