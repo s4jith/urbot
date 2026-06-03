@@ -3,6 +3,7 @@ import re
 import random
 
 from utils.gemini import call_gemini, _QUESTION_LANGUAGE_RULE
+from utils.ollama_client import call_ollama
 
 
 def _extract_json_object(text: str) -> str:
@@ -163,7 +164,7 @@ Return ONLY valid JSON array with objects:
 """
 
     try:
-        result = await call_gemini(
+        result = await call_ollama(
             prompt,
             max_attempts=3,
             request_timeout_seconds=20,
@@ -259,7 +260,7 @@ Return ONLY valid JSON object:
 """
 
     try:
-        result = await call_gemini(
+        result = await call_ollama(
             prompt,
             max_attempts=3,
             request_timeout_seconds=18,
@@ -334,7 +335,7 @@ Return ONLY valid JSON array with objects:
 """
 
     try:
-        result = await call_gemini(
+        result = await call_ollama(
             prompt,
             max_attempts=3,
             request_timeout_seconds=20,

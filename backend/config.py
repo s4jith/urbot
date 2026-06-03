@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = "gemini-2.5-flash"
     GEMINI_FALLBACK_MODELS: str = ""
 
+    # Ollama
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "mistral-nemo"
+
     # MongoDB Atlas
     MONGO_URI: str
     MONGO_DB_NAME: str = "interview_bot"

@@ -10,6 +10,7 @@ import time
 from time import perf_counter
 from langchain_core.prompts import PromptTemplate
 from services.latency_service import record_latency
+from utils.ollama_client import call_ollama
 
 # Shared language style instruction injected into every question-generation prompt.
 _QUESTION_LANGUAGE_RULE = (
@@ -747,7 +748,7 @@ Return ONLY valid JSON, no markdown formatting."""
     prompt = prompt_template.format(context=context, difficulty=difficulty, language_rule=_QUESTION_LANGUAGE_RULE)
 
     try:
-        result = _extract_json_object(await call_gemini(prompt))
+        result = _extract_json_object(await call_ollama(prompt))
         return json.loads(result)
     except Exception:
         return {
@@ -827,7 +828,7 @@ Return ONLY JSON, no markdown."""
     prompt = prompt_template.format(context=context, count=count, language_rule=_QUESTION_LANGUAGE_RULE)
 
     try:
-        result = _extract_json_array((await call_gemini(prompt)).strip())
+        result = _extract_json_array((await call_ollama(prompt)).strip())
         data = json.loads(result)
         if not isinstance(data, list):
             raise ValueError("Batch response is not a list")
