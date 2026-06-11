@@ -27,8 +27,8 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 # Suppress noisy third-party loggers
-logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+logging.getLogger("httpx").setLevel(logging.INFO)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
@@ -43,16 +43,16 @@ async def lifespan(app: FastAPI):
     await connect_db()
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     try:
-        await asyncio.wait_for(warmup_xtts_model(), timeout=45)
-        logger.info("XTTS warmup: ready")
+        await warmup_xtts_model()
+        logger.info("XTTS proxy configured")
     except Exception as exc:
-        logger.warning("XTTS warmup skipped: %s", exc)
+        logger.warning("XTTS proxy error: %s", exc)
 
     try:
-        await asyncio.wait_for(warmup_whisper_model(), timeout=45)
-        logger.info("Whisper warmup: ready")
+        await warmup_whisper_model()
+        logger.info("Whisper proxy configured")
     except Exception as exc:
-        logger.warning("Whisper warmup skipped: %s", exc)
+        logger.warning("Whisper proxy error: %s", exc)
     logger.info("Interview Bot API running in %s mode", settings.APP_ENV)
     yield
     # Shutdown

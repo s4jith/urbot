@@ -2,7 +2,7 @@ import json
 import re
 import random
 
-from utils.gemini import call_gemini, _QUESTION_LANGUAGE_RULE
+from utils.gemini import call_gemini, _QUESTION_LANGUAGE_RULE, _collect_unaware_questions
 from utils.ollama_client import call_ollama
 
 
@@ -312,6 +312,7 @@ async def generate_topic_followup_batch(
     payload = {
         "topic": topic_name,
         "qa_pairs": qa_pairs,
+        "unaware_questions": _collect_unaware_questions(qa_pairs),
         "excluded_questions": excluded_questions[-30:] if excluded_questions else [],
         "count": count,
     }
@@ -325,7 +326,8 @@ Input JSON:
 Rules:
 1) Stay in topic scope only.
 2) Build on candidate weak points from qa_pairs.
-3) Do not repeat/paraphrase excluded_questions.
+2a) If candidate's answer indicates they do not know, are not familiar with, or lack experience with a concept (listed in unaware_questions), DO NOT ask any follow-up or future questions on that topic. Immediately switch/rotate to a completely different sub-topic.
+3) Do not repeat, paraphrase, or ask about the same concept as excluded_questions or unaware_questions.
 4) VOICE INTERVIEW — CRITICAL: Never ask the candidate to write code, implement a function, write SQL, draw a diagram, or produce any written/visual output. All questions must be answerable by speaking only. Use phrasing like "How would you approach...", "Explain how...", "Walk me through..." instead.
 
 Return ONLY valid JSON array with objects:

@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "mistral-nemo"
 
+    # System 3 (Speech Services)
+    STT_SERVICE_URL: str = "http://192.168.76.19:8002/transcribe"
+    TTS_SERVICE_URL: str = "http://192.168.76.19:8002/synthesize"
+
     # MongoDB Atlas
     MONGO_URI: str
     MONGO_DB_NAME: str = "interview_bot"

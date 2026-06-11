@@ -470,7 +470,33 @@ def _fallback_skill_scan(resume_text: str) -> list:
     return normalize_skill_list(found)
 
 
+def _is_unaware_answer(answer: str) -> bool:
+    text = (answer or "").strip().lower()
+    if not text:
+        return False
+    unaware_markers = [
+        "don't know",
+        "dont know",
+        "no idea",
+        "not aware",
+        "haven't used",
+        "have not used",
+        "never used",
+        "not familiar",
+        "haven't worked",
+        "have not worked",
+        "don't recall",
+        "dont recall",
+    ]
+    words = text.split()
+    if len(words) <= 3 and any(w in ["no", "skip", "pass", "sorry", "none"] for w in words):
+        return True
+    return any(marker in text for marker in unaware_markers)
+
+
 def _is_loose_answer(answer: str) -> bool:
+    if _is_unaware_answer(answer):
+        return False
     text = (answer or "").strip().lower()
     if not text:
         return True
@@ -483,8 +509,6 @@ def _is_loose_answer(answer: str) -> bool:
         "i think",
         "maybe",
         "not sure",
-        "dont know",
-        "don't know",
         "something like",
         "etc",
         "kind of",
@@ -506,6 +530,16 @@ def _collect_loose_qa(qa_pairs: list, limit: int = 4) -> list:
             break
     loose.reverse()
     return loose
+
+
+def _collect_unaware_questions(qa_pairs: list) -> list[str]:
+    unaware = []
+    for qa in qa_pairs or []:
+        question = (qa or {}).get("question", "")
+        answer = (qa or {}).get("answer", "")
+        if question and answer and _is_unaware_answer(answer):
+            unaware.append(question)
+    return unaware
 
 
 async def parse_resume_with_gemini(resume_text: str) -> dict:
@@ -1031,6 +1065,7 @@ async def generate_followup_question_batch_from_qa(
         "count": count,
         "answered_qa": compact_qa,
         "loose_qa": _collect_loose_qa(qa_pairs),
+        "unaware_questions": _collect_unaware_questions(qa_pairs),
         "previous_questions": previous_questions,
         "company_name": company_name or "",
         "experience_level": experience_level or "mid",
@@ -1071,8 +1106,9 @@ Instructions:
 1. Generate exactly {count} follow-up questions using answered_qa context.
 2. Questions must continue naturally from candidate's previous answers.
 2a. Ask ONLY from the provided skills list. Do not introduce new unrelated skills/tools.
-3. Do not repeat or paraphrase any question in previous_questions.
-4. Prioritize loose_qa first: if any answer is vague/short/uncertain, ask a direct follow-up that probes missing concept depth.
+2b. If the candidate's answer indicates they do not know, are not familiar with, or lack experience with a concept (listed in unaware_questions), DO NOT ask any follow-up or future questions on that topic. Immediately switch/rotate to a completely different skill/topic from the skills list.
+3. Do not repeat, paraphrase, or ask about the same concept as previous_questions or unaware_questions.
+4. Prioritize loose_qa first: if any answer is vague/short/uncertain (and NOT an unaware response), ask a direct follow-up that probes missing concept depth.
 5. Focus on concept validation (why, how, trade-offs, failure modes), not memorized definitions.
 6. Keep questions practical and role-relevant.
 7. Use difficulty {difficulty}. Strictly respect the candidate level instruction above.
