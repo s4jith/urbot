@@ -296,6 +296,8 @@ function InterviewContent() {
 
   const startRecording = () => {
     if (!sttSupported || isTranscribing) return;
+    stopSpeaking();
+    setIsSpeaking(false);
     const beginRecording = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });

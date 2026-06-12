@@ -63,6 +63,8 @@ class QuestionScore(BaseModel):
 class InterviewReport(BaseModel):
     session_id: str
     overall_score: int
+    technical_score: Optional[int] = None
+    grammatical_score: Optional[int] = None
     total_questions: int
     strengths: List[str]
     weaknesses: List[str]

@@ -28,6 +28,8 @@ export interface InterviewReport {
   role_id?: string;
   role_title?: string;
   overall_score: number;
+  technical_score?: number | null;
+  grammatical_score?: number | null;
   total_questions: number;
   strengths: string[];
   weaknesses: string[];

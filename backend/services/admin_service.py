@@ -537,6 +537,8 @@ async def list_admin_reports(limit: int = 100) -> list:
                 "user_email": (user_doc or {}).get("email", "Unknown"),
                 "role_title": report.get("role_title", "Unknown"),
                 "overall_score": report.get("overall_score", 0),
+                "technical_score": report.get("technical_score"),
+                "grammatical_score": report.get("grammatical_score"),
                 "total_questions": report.get("total_questions", 0),
                 "completed_at": report.get("completed_at", ""),
                 "session_status": report.get("session_status", "completed"),

@@ -95,7 +95,23 @@ export default function AdminReportDetailPage() {
               <span className={`text-4xl font-bold ${scoreColor(report.overall_score)}`}>{report.overall_score}</span>
             </div>
             <p className="text-lg font-semibold">Overall Score</p>
-            <p className="text-sm text-muted">{report.total_questions} questions answered</p>
+            <p className="text-xs text-muted mb-4">{report.total_questions} questions answered</p>
+
+            <div className="flex justify-center items-center gap-6 max-w-sm mx-auto mt-2 pt-3 border-t border-slate-100 dark:border-slate-800/50">
+              <div className="text-center flex-1">
+                <p className="text-[10px] uppercase font-bold text-muted tracking-wider mb-1">Technical Knowledge</p>
+                <p className={`text-xl font-extrabold ${scoreColor(report.technical_score ?? report.overall_score)}`}>
+                  {report.technical_score ?? report.overall_score}%
+                </p>
+              </div>
+              <div className="w-px h-8 bg-slate-200 dark:bg-slate-800/80 shrink-0" />
+              <div className="text-center flex-1">
+                <p className="text-[10px] uppercase font-bold text-muted tracking-wider mb-1">Grammar & Fluency</p>
+                <p className={`text-xl font-extrabold ${scoreColor(report.grammatical_score ?? 75)}`}>
+                  {report.grammatical_score ?? "N/A"}%
+                </p>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">

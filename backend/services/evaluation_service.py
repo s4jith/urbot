@@ -99,6 +99,8 @@ async def generate_report(session_id: str, user_id: str) -> dict:
         "is_quit": session_status in {"quit", "quit_with_report"},
         "quit_at": quit_at,
         "overall_score": evaluation.get("overall_score", 0),
+        "technical_score": evaluation.get("technical_score"),
+        "grammatical_score": evaluation.get("grammatical_score"),
         "total_questions": len(qa_pairs),
         "detailed_scores": evaluation.get("detailed_scores", []),
         "strengths": evaluation.get("strengths", []),

@@ -28,17 +28,18 @@ _QUESTION_LANGUAGE_RULE = (
     "VOICE INTERVIEW FORMAT — CRITICAL RULES (never violate these):\n"
     "  - This is a SPOKEN, VOICE-ONLY interview. The candidate can only answer verbally.\n"
     "  - NEVER ask the candidate to write code, write a function, implement an algorithm, "
-    "or produce any written output.\n"
+    "write a formula, write an equation, or produce any written/text output.\n"
     "  - NEVER ask the candidate to draw, sketch, or create any diagram, flowchart, or "
     "visual representation.\n"
-    "  - NEVER use prompts like 'Write a program...', 'Code the following...', "
+    "  - NEVER ask questions that require writing down math, formulas, equations, or code syntax.\n"
+    "  - NEVER use phrases like 'Write a program...', 'Code the following...', 'Write the formula...', "
     "'Implement a function that...', 'Write the SQL query...', 'Draw a diagram...', "
-    "'Sketch the architecture...', or any phrasing that requires writing or drawing.\n"
+    "'Sketch the architecture...', or any phrasing that requires writing, drawing, or notation.\n"
     "  - Instead, ask the candidate to EXPLAIN, DESCRIBE, WALK THROUGH, or DISCUSS "
     "concepts verbally. For example: 'How would you approach...', "
     "'Can you explain how...', 'Walk me through your thought process for...', "
     "'What would your strategy be for...'\n"
-    "  - All questions must be answerable by speaking alone — no pen, paper, or "
+    "  - All questions must be answerable by speaking alone — no pen, paper, formula sheets, or "
     "keyboard required.\n"
 )
 
@@ -1129,8 +1130,12 @@ No markdown, no extra text."""
     )
 
     try:
-        result = (await call_gemini(prompt)).strip()
-        data = json.loads(result)
+        result = await call_ollama(
+            prompt,
+            max_attempts=3,
+            request_timeout_seconds=20,
+        )
+        data = json.loads(_extract_json_array(result.strip()))
         if not isinstance(data, list):
             raise ValueError("Follow-up batch response is not a list")
 
@@ -1231,7 +1236,9 @@ Scoring policy:
 
 Return ONLY valid JSON object with this exact schema:
 {{
-  "overall_score": 0-100 integer,
+  "overall_score": 0-100 integer (weighted balance of technical score and language/grammar),
+  "technical_score": 0-100 integer (representing the overall technical knowledge shown across all questions),
+  "grammatical_score": 0-100 integer (representing the overall language usage, grammar, and speaking clarity shown across all answers),
   "per_question": [
     {{"index": 1-based integer, "score": 0-100 integer, "feedback": "short concept-focused feedback"}}
   ],
@@ -1254,7 +1261,7 @@ Rules:
     parsed = None
     try:
         result = _extract_json_object(
-            await call_gemini(
+            await call_ollama(
                 prompt,
                 max_attempts=3,
                 request_timeout_seconds=45,
@@ -1298,6 +1305,8 @@ Rules:
 
     if isinstance(parsed, dict):
         overall_score = _clamp_score(parsed.get("overall_score"), int(round(sum(item["score"] for item in detailed_scores) / max(1, len(detailed_scores)))))
+        technical_score = _clamp_score(parsed.get("technical_score"), overall_score)
+        grammatical_score = _clamp_score(parsed.get("grammatical_score"), 75)
         strengths = [str(s).strip() for s in (parsed.get("strengths") or []) if str(s).strip()][:5]
         weaknesses = [str(w).strip() for w in (parsed.get("weaknesses") or []) if str(w).strip()][:5]
         recommendations = [str(r).strip() for r in (parsed.get("recommendations") or []) if str(r).strip()][:5]
@@ -1311,6 +1320,8 @@ Rules:
 
         return {
             "overall_score": overall_score,
+            "technical_score": technical_score,
+            "grammatical_score": grammatical_score,
             "detailed_scores": detailed_scores,
             "strengths": strengths,
             "weaknesses": weaknesses,
@@ -1320,6 +1331,8 @@ Rules:
     fallback_overall = int(round(sum(item["score"] for item in detailed_scores) / max(1, len(detailed_scores))))
     return {
         "overall_score": _clamp_score(fallback_overall, 50),
+        "technical_score": _clamp_score(fallback_overall, 50),
+        "grammatical_score": 75,
         "detailed_scores": detailed_scores,
         "strengths": ["Attempted responses for all interview prompts"],
         "weaknesses": ["Detailed AI evaluation was unavailable for this run"],

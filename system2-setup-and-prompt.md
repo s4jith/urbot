@@ -85,7 +85,9 @@ async def transcribe(audio: UploadFile = File(...), language: str = Form("en")):
             language=language,
             beam_size=1,
             condition_on_previous_text=False,
-            temperature=0.0
+            temperature=0.0,
+            vad_filter=True,
+            vad_parameters=dict(min_speech_duration_ms=250)
         )
         text = " ".join([seg.text for seg in segments]).strip()
         os.remove(tmp_path)
