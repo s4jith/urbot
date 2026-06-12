@@ -29,13 +29,19 @@ class QuestionCreate(BaseModel):
     question: str
     difficulty: str = "medium"
     category: Optional[str] = None
+    subtopic: Optional[str] = None
     expected_answer: Optional[str] = None
+
+
+class QuestionBatchCreate(BaseModel):
+    questions: List[QuestionCreate]
 
 
 class QuestionUpdate(BaseModel):
     question: Optional[str] = None
     difficulty: Optional[str] = None
     category: Optional[str] = None
+    subtopic: Optional[str] = None
     expected_answer: Optional[str] = None
 
 
@@ -47,6 +53,11 @@ class QuestionResponse(BaseModel):
     question: str
     difficulty: str
     category: Optional[str] = None
+    subtopic: Optional[str] = None
+    usage_count: Optional[int] = 0
+    last_used_at: Optional[str] = None
+    average_score: Optional[float] = 0.0
+    followup_trigger_rate: Optional[float] = 0.0
     created_at: str
 
 

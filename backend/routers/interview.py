@@ -40,6 +40,7 @@ async def start_interview_endpoint(
             interview_type=body.interview_type,
             topic_id=body.topic_id,
             job_description_id=body.job_description_id,
+            difficulty=body.difficulty,
         )
         return result
     except ValueError as e:
@@ -64,6 +65,7 @@ async def start_interview_compat_endpoint(
             interview_type=body.interview_type,
             topic_id=body.topic_id,
             job_description_id=body.job_description_id,
+            difficulty=body.difficulty,
         )
         return result
     except ValueError as e:

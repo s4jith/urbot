@@ -41,6 +41,76 @@ def question_fingerprint(text: str) -> str:
     return value
 
 
+def are_questions_similar(q1: str, q2: str) -> bool:
+    def clean(q):
+        q = (q or "").lower()
+        q = re.sub(r"[^\w\s]", "", q)
+        words = q.split()
+        stopwords = {
+            "what", "is", "are", "explain", "describe", "define", "the", "a", "an", 
+            "of", "to", "in", "for", "with", "about", "how", "why", "detail", "details",
+            "properties", "concept", "conceptually", "briefly", "shortly"
+        }
+        stemmed = []
+        for w in words:
+            if w in stopwords:
+                continue
+            if w.endswith("ing"):
+                w = w[:-3]
+            elif w.endswith("ed"):
+                w = w[:-2]
+            elif w.endswith("es"):
+                w = w[:-2]
+            elif w.endswith("s") and not w.endswith("ss"):
+                w = w[:-1]
+            if w:
+                stemmed.append(w)
+        return set(stemmed)
+
+    w1 = clean(q1)
+    w2 = clean(q2)
+    if not w1 or not w2:
+        return (q1 or "").strip().lower() == (q2 or "").strip().lower()
+
+    intersection = w1.intersection(w2)
+    union = w1.union(w2)
+    jaccard = len(intersection) / len(union)
+
+    is_subset = False
+    if len(w1) <= 2 or len(w2) <= 2:
+        smaller = w1 if len(w1) < len(w2) else w2
+        larger = w2 if len(w1) < len(w2) else w1
+        if smaller.issubset(larger) and len(smaller) > 0 and len(larger) <= 3:
+            is_subset = True
+
+    return jaccard > 0.5 or is_subset
+
+
+async def get_all_session_question_texts(redis, session_id: str) -> list[str]:
+    texts_key = f"session:{session_id}:asked_questions_texts"
+    asked = await redis.smembers(texts_key)
+    asked_list = [t.decode("utf-8") if isinstance(t, bytes) else t for t in asked] if asked else []
+
+    qids_key = f"session:{session_id}:questions"
+    qids = await redis.lrange(qids_key, 0, -1)
+
+    queued_list = []
+    if qids:
+        for qid_raw in qids:
+            qid = qid_raw.decode("utf-8") if isinstance(qid_raw, bytes) else qid_raw
+            q = await redis.hgetall(f"session:{session_id}:q:{qid}")
+            q_decoded = {}
+            for k, v in q.items():
+                k_str = k.decode("utf-8") if isinstance(k, bytes) else k
+                v_str = v.decode("utf-8") if isinstance(v, bytes) else v
+                q_decoded[k_str] = v_str
+            
+            if q_decoded.get("question"):
+                queued_list.append(q_decoded["question"])
+
+    return list(set(asked_list + queued_list))
+
+
 async def mark_question_asked(redis, session_id: str, question_text: str, ttl_seconds: int) -> None:
     fp = question_fingerprint(question_text)
     if not fp:
@@ -49,6 +119,10 @@ async def mark_question_asked(redis, session_id: str, question_text: str, ttl_se
     key = _key(session_id, ASKED_SET_SUFFIX)
     await redis.sadd(key, fp)
     await redis.expire(key, ttl_seconds)
+
+    texts_key = f"session:{session_id}:asked_questions_texts"
+    await redis.sadd(texts_key, question_text)
+    await redis.expire(texts_key, ttl_seconds)
 
 
 async def is_question_asked(redis, session_id: str, question_text: str) -> bool:
@@ -90,20 +164,25 @@ async def _append_question_object(
     difficulty: str,
     category: str,
     ttl_seconds: int,
+    db_question_id: Optional[str] = None,
+    subtopic: Optional[str] = None,
 ) -> str:
     normalized_question = normalize_question_text(question)
     qid = generate_id()
     q_key = f"session:{session_id}:q:{qid}"
 
-    await redis.hset(
-        q_key,
-        mapping={
-            "question_id": qid,
-            "question": normalized_question,
-            "difficulty": difficulty or "medium",
-            "category": category or "general",
-        },
-    )
+    mapping = {
+        "question_id": qid,
+        "question": normalized_question,
+        "difficulty": difficulty or "medium",
+        "category": category or "general",
+    }
+    if db_question_id:
+        mapping["db_question_id"] = db_question_id
+    if subtopic:
+        mapping["subtopic"] = subtopic
+
+    await redis.hset(q_key, mapping=mapping)
     await redis.expire(q_key, ttl_seconds)
 
     questions_key = f"session:{session_id}:questions"
@@ -120,6 +199,8 @@ async def enqueue_question(
     category: str = "general",
     ttl_seconds: int = 7200,
     max_queue_size: int = 3,
+    db_question_id: Optional[str] = None,
+    subtopic: Optional[str] = None,
 ) -> Optional[str]:
     text = normalize_question_text(question)
     if not text:
@@ -133,6 +214,12 @@ async def enqueue_question(
     if await _is_question_queued(redis, session_id, text):
         return None
 
+    # Check semantic similarity!
+    all_prev = await get_all_session_question_texts(redis, session_id)
+    for prev in all_prev:
+        if are_questions_similar(prev, text):
+            return None
+
     q_len = await redis.llen(queue_key)
     qid = await _append_question_object(
         redis=redis,
@@ -141,6 +228,8 @@ async def enqueue_question(
         difficulty=difficulty,
         category=category,
         ttl_seconds=ttl_seconds,
+        db_question_id=db_question_id,
+        subtopic=subtopic,
     )
 
     await _mark_question_queued(redis, session_id, text, ttl_seconds)

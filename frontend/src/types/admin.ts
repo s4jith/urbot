@@ -8,6 +8,7 @@ export interface AdminQuestion {
   question: string;
   difficulty: "easy" | "medium" | "hard";
   category?: string;
+  subtopic?: string;
 }
 
 export interface TopPerformer {

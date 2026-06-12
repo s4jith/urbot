@@ -323,12 +323,13 @@ Generate exactly {count} topic-focused technical follow-up questions.
 Input JSON:
 {json.dumps(payload, ensure_ascii=True)}
 
-Rules:
-1) Stay in topic scope only.
-2) Build on candidate weak points from qa_pairs.
-2a) If candidate's answer indicates they do not know, are not familiar with, or lack experience with a concept (listed in unaware_questions), DO NOT ask any follow-up or future questions on that topic. Immediately switch/rotate to a completely different sub-topic.
-3) Do not repeat, paraphrase, or ask about the same concept as excluded_questions or unaware_questions.
-4) VOICE INTERVIEW — CRITICAL: Never ask the candidate to write code, implement a function, write SQL, draw a diagram, or produce any written/visual output. All questions must be answerable by speaking only. Use phrasing like "How would you approach...", "Explain how...", "Walk me through..." instead.
+Follow-Up Rules:
+1) Directly related to the candidate's previous answer.
+2) Probe deeper understanding, explore tradeoffs, clarify misconceptions, or validate claimed experience.
+3) Do NOT introduce a new topic, repeat the original question, or jump to unrelated concepts.
+4) Do NOT repeat, paraphrase, or ask about the same concept as excluded_questions or unaware_questions.
+4a) If candidate's answer indicates they do not know, are not familiar with, or lack experience with a concept (listed in unaware_questions), DO NOT ask any follow-up or future questions on that topic. Immediately switch/rotate to a completely different sub-topic.
+5) VOICE INTERVIEW — CRITICAL: Never ask the candidate to write code, implement a function, write SQL, draw a diagram, or produce any written/visual output. All questions must be answerable by speaking only. Use phrasing like "How would you approach...", "Explain how...", "Walk me through..." instead.
 
 Return ONLY valid JSON array with objects:
 - question (string)

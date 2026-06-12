@@ -23,6 +23,7 @@ export default function AdminEditQuestionPage() {
   const [topicId, setTopicId] = useState("");
   const [question, setQuestion] = useState("");
   const [difficulty, setDifficulty] = useState<Difficulty>("medium");
+  const [subtopic, setSubtopic] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -45,6 +46,7 @@ export default function AdminEditQuestionPage() {
       setTopicId(String(q?.topic_id || ""));
       setQuestion(String(q?.question || ""));
       setDifficulty((q?.difficulty || "medium") as Difficulty);
+      setSubtopic(String(q?.subtopic || ""));
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Failed to load question");
       router.push("/admin/questions");
@@ -66,6 +68,7 @@ export default function AdminEditQuestionPage() {
         topic_id: topicId,
         question,
         difficulty,
+        subtopic,
       });
       router.push("/admin/questions");
     } catch (err: any) {
@@ -121,6 +124,13 @@ export default function AdminEditQuestionPage() {
                     </option>
                   ))}
                 </select>
+                <input
+                  type="text"
+                  placeholder="Subtopic (e.g., Transactions, Joins, Normalization)"
+                  value={subtopic}
+                  onChange={(e) => setSubtopic(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-black/20 text-sm"
+                />
                 <textarea
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}

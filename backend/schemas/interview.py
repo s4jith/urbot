@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 
 
 class StartInterviewRequest(BaseModel):
@@ -8,6 +8,7 @@ class StartInterviewRequest(BaseModel):
     interview_type: Optional[str] = "resume"
     topic_id: Optional[str] = None
     job_description_id: Optional[str] = None
+    difficulty: Optional[str] = "medium"
 
 
 class VerifyResumeJdRequest(BaseModel):
@@ -70,4 +71,22 @@ class InterviewReport(BaseModel):
     weaknesses: List[str]
     detailed_scores: List[QuestionScore]
     recommendations: List[str]
+    difficulty_distribution: Optional[Dict[str, int]] = None
+    subtopic_scores: Optional[Dict[str, int]] = None
+    strongest_subtopics: Optional[List[str]] = None
+    weakest_subtopics: Optional[List[str]] = None
+    coverage_percentage: Optional[int] = None
+    recommended_learning_path: Optional[List[str]] = None
     completed_at: str
+    performance_level: Optional[str] = None
+    hiring_recommendation: Optional[str] = None
+    interview_duration: Optional[str] = None
+    questions_attempted: Optional[int] = None
+    questions_answered: Optional[int] = None
+    topic_scores: Optional[Dict[str, int]] = None
+    communication_analysis: Optional[Dict[str, Any]] = None
+    learning_roadmap: Optional[List[Dict[str, Any]]] = None
+    hiring_simulation: Optional[Dict[str, Any]] = None
+    progression: Optional[Dict[str, Any]] = None
+    history: Optional[List[Dict[str, Any]]] = None
+

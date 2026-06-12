@@ -65,6 +65,7 @@ export default function AdminQuestionsPage() {
         question: String(q?.question || ""),
         difficulty: (q?.difficulty || "medium") as "easy" | "medium" | "hard",
         category: typeof q?.category === "string" ? q.category : "",
+        subtopic: typeof q?.subtopic === "string" ? q.subtopic : "",
       }));
 
       setQuestions(normalized);
@@ -204,6 +205,11 @@ export default function AdminQuestionsPage() {
                           {topic && (
                             <span className="px-2 py-0.5 rounded-full text-xs border border-cyan-500/30 bg-cyan-500/10 text-cyan-200">
                               {topic}
+                            </span>
+                          )}
+                          {q.subtopic && (
+                            <span className="px-2 py-0.5 rounded-full text-xs border border-purple-500/30 bg-purple-500/10 text-purple-200">
+                              {q.subtopic}
                             </span>
                           )}
                           {showCategory && (

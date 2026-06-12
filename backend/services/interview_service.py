@@ -1,3 +1,4 @@
+from typing import Optional, List, Dict
 import json
 import asyncio
 import random
@@ -28,9 +29,12 @@ from services.queue_service import (
     push_context_item,
     question_fingerprint as _question_fingerprint,
     queue_size,
+    are_questions_similar,
+    get_all_session_question_texts,
 )
 from services.tts_service import prefetch_wav
 from services.latency_service import record_latency
+from services.subtopic_service import evaluate_subtopics
 
 MAX_QUESTIONS = 20
 RESUME_MAX_QUESTIONS = 10
@@ -634,38 +638,308 @@ async def _get_answered_question_texts(redis, session_id: str, limit: int = 4) -
     return output
 
 
+def _get_target_difficulty_counts(interview_difficulty: str, total_questions: int) -> dict[str, int]:
+    diff = (interview_difficulty or "medium").strip().lower()
+    if diff == "easy":
+        easy = round(0.6 * total_questions)
+        medium = round(0.3 * total_questions)
+        hard = total_questions - easy - medium
+    elif diff == "hard":
+        easy = round(0.1 * total_questions)
+        medium = round(0.3 * total_questions)
+        hard = total_questions - easy - medium
+    else:  # medium
+        easy = round(0.2 * total_questions)
+        medium = round(0.6 * total_questions)
+        hard = total_questions - easy - medium
+    return {"easy": easy, "medium": medium, "hard": hard}
+
+
+async def _get_session_difficulty_distribution(redis, session_id: str) -> dict[str, int]:
+    if not redis or not session_id:
+        return {"easy": 0, "medium": 0, "hard": 0}
+    qids = await redis.lrange(f"session:{session_id}:questions", 0, -1)
+    counts = {"easy": 0, "medium": 0, "hard": 0}
+    for qid_raw in qids:
+        qid = qid_raw.decode("utf-8") if isinstance(qid_raw, bytes) else qid_raw
+        q = await redis.hgetall(f"session:{session_id}:q:{qid}")
+        diff_bytes = q.get(b"difficulty") if b"difficulty" in q else q.get("difficulty")
+        if diff_bytes:
+            diff = (diff_bytes.decode("utf-8") if isinstance(diff_bytes, bytes) else diff_bytes).strip().lower()
+            if diff in counts:
+                counts[diff] += 1
+    return counts
+
+
 async def _sample_topic_questions(
     db,
     topic_id: str,
     excluded_questions: list[str],
     limit: int,
+    interview_difficulty: str = "medium",
+    session_id: str = None,
+    redis = None,
 ) -> list[dict]:
     if limit <= 0:
         return []
 
     docs = await db[TOPIC_QUESTIONS].find({"topic_id": topic_id}).to_list(length=500)
-    random.shuffle(docs)
-    excluded = {_question_fingerprint(q) for q in excluded_questions if q}
 
-    selected: list[dict] = []
+    from collections import defaultdict
+    subtopic_map = defaultdict(list)
     for doc in docs:
         text = (doc.get("question") or "").strip()
         if not text:
             continue
-        fp = _question_fingerprint(text)
-        if not fp or fp in excluded:
+        
+        # Check semantic similarity against excluded_questions
+        is_excluded = False
+        for ex in excluded_questions:
+            if ex and are_questions_similar(ex, text):
+                is_excluded = True
+                break
+        if is_excluded:
             continue
 
-        excluded.add(fp)
-        selected.append(
-            {
-                "question": text,
-                "difficulty": _normalize_bank_difficulty(doc.get("difficulty") or "medium"),
-                "category": doc.get("category") or "topic",
+        sub = (doc.get("subtopic") or "").strip() or "General"
+        subtopic_map[sub].append(doc)
+
+    subtopics_keys = list(subtopic_map.keys())
+    if not subtopics_keys:
+        return []
+    subtopics_keys.sort()
+
+    target_counts = _get_target_difficulty_counts(interview_difficulty, TOPIC_TOTAL_QUESTIONS)
+    current_counts = await _get_session_difficulty_distribution(redis, session_id)
+
+    selected: list[dict] = []
+    chosen_fingerprints = set()
+
+    while len(selected) < limit:
+        added_in_round = False
+        for sub in subtopics_keys:
+            candidates = subtopic_map[sub]
+            
+            deficient_difficulties = {
+                diff for diff, target in target_counts.items() if current_counts[diff] < target
             }
-        )
-        if len(selected) >= limit:
+            if not deficient_difficulties:
+                deficient_difficulties = {"easy", "medium", "hard"}
+
+            available = []
+            for doc in candidates:
+                text = (doc.get("question") or "").strip()
+                fp = _question_fingerprint(text)
+                if fp in chosen_fingerprints:
+                    continue
+                available.append(doc)
+
+            if not available:
+                continue
+
+            def get_sort_key(doc):
+                usage_count = doc.get("usage_count") or 0
+                last_used = doc.get("last_used_at")
+                if last_used is None:
+                    last_used_ts = 0.0
+                elif hasattr(last_used, "timestamp"):
+                    last_used_ts = last_used.timestamp()
+                else:
+                    last_used_ts = 0.0
+                diff = _normalize_bank_difficulty(doc.get("difficulty") or "medium")
+                diff_priority = 0 if diff in deficient_difficulties else 1
+                return (usage_count, last_used_ts, diff_priority)
+
+            available.sort(key=get_sort_key)
+            best_doc = available[0]
+
+            q_text = (best_doc.get("question") or "").strip()
+            q_diff = _normalize_bank_difficulty(best_doc.get("difficulty") or "medium")
+            
+            selected.append(
+                {
+                    "question": q_text,
+                    "difficulty": q_diff,
+                    "category": best_doc.get("category") or "topic",
+                    "subtopic": best_doc.get("subtopic") or "",
+                    "db_question_id": str(best_doc["_id"]) if best_doc.get("_id") else None,
+                }
+            )
+            chosen_fingerprints.add(_question_fingerprint(q_text))
+            current_counts[q_diff] += 1
+            added_in_round = True
+            if len(selected) >= limit:
+                break
+        if not added_in_round:
             break
+
+    return selected
+
+
+async def _sample_adaptive_questions(
+    db,
+    topic_id: str,
+    excluded_questions: list[str],
+    limit: int,
+    strong_subtopics: list[str],
+    weak_subtopics: list[str],
+    unknown_subtopics: list[str],
+    interview_difficulty: str = "medium",
+    session_id: str = None,
+    redis = None,
+) -> list[dict]:
+    if limit <= 0:
+        return []
+
+    docs = await db[TOPIC_QUESTIONS].find({"topic_id": topic_id}).to_list(length=500)
+
+    strong_set = {s.lower() for s in strong_subtopics if s}
+    weak_set = {s.lower() for s in weak_subtopics if s}
+    unknown_set = {s.lower() for s in unknown_subtopics if s}
+
+    from collections import defaultdict
+    subtopic_map = defaultdict(list)
+    for doc in docs:
+        text = (doc.get("question") or "").strip()
+        if not text:
+            continue
+        
+        is_excluded = False
+        for ex in excluded_questions:
+            if ex and are_questions_similar(ex, text):
+                is_excluded = True
+                break
+        if is_excluded:
+            continue
+
+        sub = (doc.get("subtopic") or "").strip() or "General"
+        subtopic_map[sub].append(doc)
+
+    weak_groups = {}
+    unknown_groups = {}
+    other_groups = {}
+
+    for sub, items in subtopic_map.items():
+        sub_lower = sub.lower()
+        if sub_lower in weak_set:
+            weak_groups[sub] = items
+        elif sub_lower in unknown_set:
+            unknown_groups[sub] = items
+        else:
+            other_groups[sub] = items
+
+    reinforcement_counts = {}
+    if session_id and redis:
+        try:
+            rc_bytes = await redis.hget(f"session:{session_id}", "reinforcement_counts")
+            if rc_bytes:
+                rc_str = rc_bytes.decode("utf-8") if isinstance(rc_bytes, bytes) else rc_bytes
+                reinforcement_counts = json.loads(rc_str)
+        except Exception:
+            reinforcement_counts = {}
+
+    target_counts = _get_target_difficulty_counts(interview_difficulty, TOPIC_TOTAL_QUESTIONS)
+    current_counts = await _get_session_difficulty_distribution(redis, session_id)
+
+    selected: list[dict] = []
+    chosen_fingerprints = set()
+
+    def select_from_groups(groups, quota, is_weak_reinforcement=False):
+        picked = []
+        keys = sorted(list(groups.keys()))
+        if not keys:
+            return picked
+            
+        indices = {k: 0 for k in keys}
+        while len(picked) < quota:
+            added_any = False
+            for k in keys:
+                if is_weak_reinforcement:
+                    if reinforcement_counts.get(k, 0) >= 2:
+                        continue
+
+                candidates = groups[k]
+                
+                deficient_difficulties = {
+                    diff for diff, target in target_counts.items() if current_counts[diff] < target
+                }
+                if not deficient_difficulties:
+                    deficient_difficulties = {"easy", "medium", "hard"}
+
+                available = []
+                for doc in candidates:
+                    text = (doc.get("question") or "").strip()
+                    fp = _question_fingerprint(text)
+                    if fp in chosen_fingerprints:
+                        continue
+                    available.append(doc)
+
+                if not available:
+                    continue
+
+                def get_sort_key(doc):
+                    usage_count = doc.get("usage_count") or 0
+                    last_used = doc.get("last_used_at")
+                    if last_used is None:
+                        last_used_ts = 0.0
+                    elif hasattr(last_used, "timestamp"):
+                        last_used_ts = last_used.timestamp()
+                    else:
+                        last_used_ts = 0.0
+                    diff = _normalize_bank_difficulty(doc.get("difficulty") or "medium")
+                    diff_priority = 0 if diff in deficient_difficulties else 1
+                    return (usage_count, last_used_ts, diff_priority)
+
+                available.sort(key=get_sort_key)
+                best_doc = available[0]
+
+                q_text = (best_doc.get("question") or "").strip()
+                q_diff = _normalize_bank_difficulty(best_doc.get("difficulty") or "medium")
+
+                picked.append(
+                    {
+                        "question": q_text,
+                        "difficulty": q_diff,
+                        "category": best_doc.get("category") or "topic",
+                        "subtopic": best_doc.get("subtopic") or "",
+                        "db_question_id": str(best_doc["_id"]) if best_doc.get("_id") else None,
+                    }
+                )
+                chosen_fingerprints.add(_question_fingerprint(q_text))
+                current_counts[q_diff] += 1
+                
+                if is_weak_reinforcement:
+                    reinforcement_counts[k] = reinforcement_counts.get(k, 0) + 1
+
+                added_any = True
+                if len(picked) >= quota:
+                    break
+            if not added_any:
+                break
+        return picked
+
+    # 1. Prioritize weak subtopics (up to min(2, limit))
+    weak_quota = min(2, limit)
+    weak_picks = select_from_groups(weak_groups, weak_quota, is_weak_reinforcement=True)
+    selected.extend(weak_picks)
+
+    # 2. Pick remaining from unknown subtopics
+    unknown_quota = limit - len(selected)
+    if unknown_quota > 0:
+        unknown_picks = select_from_groups(unknown_groups, unknown_quota)
+        selected.extend(unknown_picks)
+
+    # 3. If still not enough, pick from other/strong subtopics
+    other_quota = limit - len(selected)
+    if other_quota > 0:
+        other_picks = select_from_groups(other_groups, other_quota)
+        selected.extend(other_picks)
+
+    if session_id and redis:
+        try:
+            await redis.hset(f"session:{session_id}", "reinforcement_counts", json.dumps(reinforcement_counts))
+        except Exception:
+            pass
 
     return selected
 
@@ -1325,7 +1599,7 @@ async def _generate_mixed_followup_batch(
     }
 
 
-async def _start_topic_interview(user_id: str, topic_id: str) -> dict:
+async def _start_topic_interview(user_id: str, topic_id: str, difficulty: str = "medium") -> dict:
     """Start topic interview with low-cost DB-first flow and staged AI follow-ups."""
     db = get_db()
     redis = get_redis()
@@ -1341,6 +1615,9 @@ async def _start_topic_interview(user_id: str, topic_id: str) -> dict:
         topic_id=topic_id,
         excluded_questions=[],
         limit=TOPIC_INITIAL_DB_QUESTIONS,
+        interview_difficulty=difficulty,
+        session_id=None,
+        redis=None,
     )
     if len(initial_items) < TOPIC_INITIAL_ASK_COUNT:
         raise ValueError("Not enough topic questions to start interview")
@@ -1369,6 +1646,8 @@ async def _start_topic_interview(user_id: str, topic_id: str) -> dict:
             "question": normalize_question_text(first_question.get("question", "Can you explain this topic?")),
             "difficulty": first_question.get("difficulty", "medium"),
             "category": first_question.get("category", topic.get("name", "topic")),
+            "db_question_id": first_question.get("db_question_id") or "",
+            "subtopic": first_question.get("subtopic") or "General",
         },
     )
     await redis.expire(f"session:{session_id}:q:{first_id}", SESSION_TTL)
@@ -1392,6 +1671,8 @@ async def _start_topic_interview(user_id: str, topic_id: str) -> dict:
             category=item.get("category", topic.get("name", "topic")),
             ttl_seconds=SESSION_TTL,
             max_queue_size=MAX_QUEUE_SIZE,
+            db_question_id=item.get("db_question_id"),
+            subtopic=item.get("subtopic") or "General",
         )
         if qid:
             queued_count += 1
@@ -1414,6 +1695,7 @@ async def _start_topic_interview(user_id: str, topic_id: str) -> dict:
         "question_count": 1,
         "max_questions": TOPIC_TOTAL_QUESTIONS,
         "current_difficulty": first_question.get("difficulty", "medium"),
+        "interview_difficulty": difficulty,
         "metrics_gemini_calls": 0,
         "metrics_gemini_questions": 0,
         "metrics_bank_questions": queued_count + 1,
@@ -1443,6 +1725,7 @@ async def _start_topic_interview(user_id: str, topic_id: str) -> dict:
         "generated_count": queued_count + 1,
         "max_questions": TOPIC_TOTAL_QUESTIONS,
         "current_difficulty": first_question.get("difficulty", "medium"),
+        "interview_difficulty": difficulty,
         "timer_enabled": str(timer_enabled),
         "timer_seconds": str(timer_seconds or ""),
         "status": "in_progress",
@@ -1581,13 +1864,14 @@ async def start_interview(
     interview_type: str = "resume",
     topic_id: str = None,
     job_description_id: str = None,
+    difficulty: Optional[str] = "medium",
 ) -> dict:
     """Start a new interview session with low-cost queue-first orchestration."""
     interview_type = (interview_type or "resume").strip().lower()
     if interview_type == "topic":
         if not topic_id:
             raise ValueError("topic_id is required for topic interviews")
-        return await _start_topic_interview(user_id=user_id, topic_id=topic_id)
+        return await _start_topic_interview(user_id=user_id, topic_id=topic_id, difficulty=difficulty)
 
     db = get_db()
     redis = get_redis()
@@ -1925,6 +2209,11 @@ async def _post_submit_topic_processing(
         if not session:
             return
 
+        session = {
+            (k.decode("utf-8") if isinstance(k, bytes) else k): (v.decode("utf-8") if isinstance(v, bytes) else v)
+            for k, v in session.items()
+        }
+
         max_questions = max(
             TOPIC_TOTAL_QUESTIONS,
             _safe_int(session.get("max_questions", TOPIC_TOTAL_QUESTIONS)),
@@ -1946,7 +2235,37 @@ async def _post_submit_topic_processing(
         qa_pairs = await get_session_qa(session_id)
         excluded_questions = await _get_session_question_texts(redis, session_id)
 
-        ai_target = min(TOPIC_AI_FOLLOWUPS, remaining_needed)
+        topic_id = session.get("topic_id", "")
+        all_questions = await db[TOPIC_QUESTIONS].find({"topic_id": topic_id}).to_list(length=1000)
+        all_subtopics = list({q.get("subtopic") for q in all_questions if q.get("subtopic")})
+
+        evaluation = await evaluate_subtopics(qa_pairs, all_subtopics)
+        strong_subtopics = evaluation.get("strong_subtopics", [])
+        weak_subtopics = evaluation.get("weak_subtopics", [])
+        unknown_subtopics = evaluation.get("unknown_subtopics", [])
+
+        await redis.hset(
+            f"session:{session_id}",
+            mapping={
+                "strong_subtopics": json.dumps(strong_subtopics),
+                "weak_subtopics": json.dumps(weak_subtopics),
+                "unknown_subtopics": json.dumps(unknown_subtopics),
+            }
+        )
+        await db[SESSIONS].update_one(
+            {"session_id": session_id},
+            {
+                "$set": {
+                    "strong_subtopics": strong_subtopics,
+                    "weak_subtopics": weak_subtopics,
+                    "unknown_subtopics": unknown_subtopics,
+                }
+            }
+        )
+
+        interview_difficulty = session.get("interview_difficulty") or "medium"
+
+        ai_target = min(2, remaining_needed)
         ai_items = await generate_topic_followup_batch(
             topic_name=session.get("role_title", "Topic Interview"),
             qa_pairs=qa_pairs,
@@ -1954,11 +2273,17 @@ async def _post_submit_topic_processing(
             count=ai_target,
         )
         db_target = max(0, remaining_needed - len(ai_items))
-        db_items = await _sample_topic_questions(
+        db_items = await _sample_adaptive_questions(
             db=db,
-            topic_id=session.get("topic_id", ""),
+            topic_id=topic_id,
             excluded_questions=excluded_questions + [i.get("question", "") for i in ai_items],
             limit=db_target,
+            strong_subtopics=strong_subtopics,
+            weak_subtopics=weak_subtopics,
+            unknown_subtopics=unknown_subtopics,
+            interview_difficulty=interview_difficulty,
+            session_id=session_id,
+            redis=redis,
         )
 
         topic_added = 0
@@ -1987,6 +2312,8 @@ async def _post_submit_topic_processing(
                 category=item.get("category", session.get("role_title", "topic")),
                 ttl_seconds=SESSION_TTL,
                 max_queue_size=MAX_QUEUE_SIZE,
+                db_question_id=item.get("db_question_id"),
+                subtopic=item.get("subtopic") or "General",
             )
             if qid:
                 topic_added += 1

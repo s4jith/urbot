@@ -59,6 +59,7 @@ async def create_question(
     question: str = "",
     difficulty: str = "medium",
     category: str = None,
+    subtopic: str = None,
     expected_answer: str = None,
 ) -> dict:
     db = get_db()
@@ -79,6 +80,7 @@ async def create_question(
         "question": question,
         "difficulty": difficulty,
         "category": category,
+        "subtopic": subtopic,
         "expected_answer": expected_answer,
         "created_at": utc_now(),
     }
@@ -322,14 +324,15 @@ Target topic: {topic_name or "General"}
 
 Rules:
 1. Extract only actual interview questions relevant to the target topic.
-2. Ignore headings, instructions, answers, explanations, and duplicates.
-3. Keep each question concise and interview-ready.
-4. Assign a difficulty: easy, medium, or hard.
+2. Automatically classify each question into a highly specific subtopic (e.g., for Topic DBMS, subtopics could be Transactions, Joins, Indexing, Normalization).
+3. Ignore headings, instructions, answers, explanations, and duplicates.
+4. Keep each question concise and interview-ready.
+5. Assign a difficulty: easy, medium, or hard.
 
 Return ONLY valid JSON in this format:
 {{
   "questions": [
-    {{"question": "...", "difficulty": "medium"}}
+    {{"question": "...", "subtopic": "...", "difficulty": "medium"}}
   ]
 }}
 
@@ -346,13 +349,14 @@ Rules:
 1. Extract only actual interview questions from the document.
 2. Ignore headings, instructions, answers, explanations, and duplicates.
 3. Assign each extracted question to ONE allowed subject from the list above.
-4. Assign a difficulty: easy, medium, or hard.
-5. Keep question text clean and concise.
+4. Automatically classify each question into a specific subtopic.
+5. Assign a difficulty: easy, medium, or hard.
+6. Keep question text clean and concise.
 
 Return ONLY valid JSON in this format:
 {{
   "questions": [
-    {{"question": "...", "subject": "...", "difficulty": "medium"}}
+    {{"question": "...", "subject": "...", "subtopic": "...", "difficulty": "medium"}}
   ]
 }}
 
@@ -396,6 +400,8 @@ Document text:
         if difficulty not in allowed_difficulties:
             difficulty = "medium"
 
+        subtopic = (item.get("subtopic") or "").strip()
+
         key = q_text.lower()
         if key in seen:
             continue
@@ -409,6 +415,7 @@ Document text:
                 "question": q_text,
                 "difficulty": difficulty,
                 "category": subject,
+                "subtopic": subtopic,
                 "source": "pdf_upload",
                 "created_at": utc_now(),
             }
@@ -419,10 +426,8 @@ Document text:
             raise ValueError("No valid topic questions found in this PDF")
         raise ValueError("No valid questions found after subject filtering")
 
-    collection = QUESTIONS if interview_type == "resume" else TOPIC_QUESTIONS
-    result = await db[collection].insert_many(docs)
     return {
-        "inserted_count": len(result.inserted_ids),
+        "questions": docs,
         "subjects": clean_subjects,
         "interview_type": interview_type,
         "topic_id": topic_id,

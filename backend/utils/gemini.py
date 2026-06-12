@@ -572,7 +572,7 @@ Resume text:
 Return ONLY valid JSON, no markdown formatting."""
 
     try:
-        result = await call_gemini(prompt)
+        result = await call_ollama(prompt)
         result = _extract_json_object(result)
     except Exception:
         return {
@@ -635,7 +635,7 @@ Rules:
 1. "title" — infer the most appropriate job title from the content (e.g. "Software Engineer", "Data Analyst").
 2. "company" — extract if explicitly mentioned, otherwise null.
 3. "description" — cleaned, coherent description text; keep it as a single string.
-4. "required_skills" — extract only specific, concrete technical skills, tools, languages, or certifications; no vague traits like "teamwork".
+4. "required_skills" — extract only specific, technical skills, tools, languages, or certifications; no vague traits.
 
 Job Description Text:
 ---
@@ -645,7 +645,7 @@ Job Description Text:
 Return ONLY valid JSON, no markdown."""
 
     try:
-        raw = await call_gemini(prompt)
+        raw = await call_ollama(prompt)
         cleaned = _extract_json_object(raw)
         parsed = json.loads(cleaned)
         return {
@@ -707,7 +707,7 @@ Rules:
 """
 
     try:
-        result = _extract_json_object(await call_gemini(prompt))
+        result = _extract_json_object(await call_ollama(prompt))
         parsed = json.loads(result)
         return {
             "meeting_expectations": parsed.get("meeting_expectations", [])[:10],

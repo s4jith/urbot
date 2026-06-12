@@ -4,7 +4,7 @@ from fastapi.responses import StreamingResponse
 from auth.jwt import require_role, get_current_user
 from schemas.admin import (
     JobRoleCreate, JobRoleUpdate,
-    QuestionCreate, QuestionUpdate,
+    QuestionCreate, QuestionUpdate, QuestionBatchCreate,
     RoleRequirementCreate,
     TopicCreate, TopicUpdate, TopicPublishUpdate,
     GroupTestCreate, GroupTestUpdate, GroupTestPublishUpdate,
@@ -128,9 +128,32 @@ async def create_question_endpoint(
         question=request.question,
         difficulty=request.difficulty,
         category=request.category,
+        subtopic=request.subtopic,
         expected_answer=request.expected_answer,
     )
     return result
+
+
+@router.post("/questions/batch")
+async def create_questions_batch_endpoint(
+    request: QuestionBatchCreate,
+    current_user: dict = Depends(require_role("admin")),
+):
+    """Create a batch of questions (admin only)."""
+    inserted_count = 0
+    for q in request.questions:
+        await create_question(
+            role_id=q.role_id,
+            topic_id=q.topic_id,
+            interview_type=q.interview_type,
+            question=q.question,
+            difficulty=q.difficulty,
+            category=q.category,
+            subtopic=q.subtopic,
+            expected_answer=q.expected_answer,
+        )
+        inserted_count += 1
+    return {"inserted_count": inserted_count}
 
 
 @router.get("/questions/{question_id}")
