@@ -61,6 +61,8 @@ async def create_question(
     category: str = None,
     subtopic: str = None,
     expected_answer: str = None,
+    original_answer: str = None,
+    compacted_answer: str = None,
 ) -> dict:
     db = get_db()
     interview_type = (interview_type or "resume").strip().lower()
@@ -72,6 +74,7 @@ async def create_question(
     if interview_type == "topic" and not topic_id:
         raise ValueError("topic_id is required for topic interview questions")
 
+    expected_answer = expected_answer or compacted_answer
     collection = QUESTIONS if interview_type == "resume" else TOPIC_QUESTIONS
     doc = {
         "role_id": role_id,
@@ -82,6 +85,8 @@ async def create_question(
         "category": category,
         "subtopic": subtopic,
         "expected_answer": expected_answer,
+        "original_answer": original_answer,
+        "compacted_answer": compacted_answer,
         "created_at": utc_now(),
     }
     result = await db[collection].insert_one(doc)
@@ -94,6 +99,8 @@ async def update_question(question_id: str, data: dict) -> dict:
     update_data = {k: v for k, v in data.items() if v is not None}
     if not update_data:
         raise ValueError("No fields to update")
+    if "compacted_answer" in update_data and not update_data.get("expected_answer"):
+        update_data["expected_answer"] = update_data["compacted_answer"]
     update_data["updated_at"] = utc_now()
     # Try resume question collection first, then topic question collection.
     result = await db[QUESTIONS].update_one({"_id": ObjectId(question_id)}, {"$set": update_data})

@@ -763,6 +763,9 @@ async def _sample_topic_questions(
                     "category": best_doc.get("category") or "topic",
                     "subtopic": best_doc.get("subtopic") or "",
                     "db_question_id": str(best_doc["_id"]) if best_doc.get("_id") else None,
+                    "expected_answer": best_doc.get("expected_answer"),
+                    "original_answer": best_doc.get("original_answer"),
+                    "compacted_answer": best_doc.get("compacted_answer"),
                 }
             )
             chosen_fingerprints.add(_question_fingerprint(q_text))
@@ -903,6 +906,9 @@ async def _sample_adaptive_questions(
                         "category": best_doc.get("category") or "topic",
                         "subtopic": best_doc.get("subtopic") or "",
                         "db_question_id": str(best_doc["_id"]) if best_doc.get("_id") else None,
+                        "expected_answer": best_doc.get("expected_answer"),
+                        "original_answer": best_doc.get("original_answer"),
+                        "compacted_answer": best_doc.get("compacted_answer"),
                     }
                 )
                 chosen_fingerprints.add(_question_fingerprint(q_text))
@@ -1283,14 +1289,21 @@ async def _append_batch_to_redis(redis, session_id: str, batch: list[dict]) -> l
             continue
         qid = generate_id()
         created_ids.append(qid)
+        mapping={
+            "question_id": qid,
+            "question": normalized_question,
+            "difficulty": item.get("difficulty", "medium"),
+            "category": item.get("category", "general"),
+        }
+        if item.get("expected_answer"):
+            mapping["expected_answer"] = item["expected_answer"]
+        if item.get("original_answer"):
+            mapping["original_answer"] = item["original_answer"]
+        if item.get("compacted_answer"):
+            mapping["compacted_answer"] = item["compacted_answer"]
         await redis.hset(
             f"session:{session_id}:q:{qid}",
-            mapping={
-                "question_id": qid,
-                "question": normalized_question,
-                "difficulty": item.get("difficulty", "medium"),
-                "category": item.get("category", "general"),
-            },
+            mapping=mapping,
         )
         await redis.rpush(f"session:{session_id}:questions", qid)
         await redis.expire(f"session:{session_id}:q:{qid}", SESSION_TTL)
@@ -2437,20 +2450,42 @@ async def submit_answer(session_id: str, question_id: str, answer: str) -> dict:
     current_q = await redis.hgetall(f"session:{session_id}:q:{question_id}")
     current_question_text = current_q.get("question", "")
 
+    a_mapping = {
+        "question_id": question_id,
+        "answer": answer,
+        "question": current_question_text,
+        "difficulty": current_q.get("difficulty", "medium"),
+        "category": current_q.get("category", "general"),
+        "submitted_at": utc_now(),
+    }
+    if current_q.get("expected_answer"):
+        a_mapping["expected_answer"] = current_q["expected_answer"]
+    if current_q.get("original_answer"):
+        a_mapping["original_answer"] = current_q["original_answer"]
+    if current_q.get("compacted_answer"):
+        a_mapping["compacted_answer"] = current_q["compacted_answer"]
+
     await redis.hset(
         f"session:{session_id}:a:{question_id}",
-        mapping={
-            "question_id": question_id,
-            "answer": answer,
-            "question": current_question_text,
-            "difficulty": current_q.get("difficulty", "medium"),
-            "category": current_q.get("category", "general"),
-            "submitted_at": utc_now(),
-        },
+        mapping=a_mapping,
     )
     await redis.rpush(f"session:{session_id}:answers", question_id)
     await redis.expire(f"session:{session_id}:a:{question_id}", SESSION_TTL)
     await redis.expire(f"session:{session_id}:answers", SESSION_TTL)
+
+    answers_set = {
+        "question": current_question_text,
+        "answer": answer,
+        "difficulty": current_q.get("difficulty", "medium"),
+        "category": current_q.get("category", "general"),
+        "stored_at": utc_now(),
+    }
+    if current_q.get("expected_answer"):
+        answers_set["expected_answer"] = current_q["expected_answer"]
+    if current_q.get("original_answer"):
+        answers_set["original_answer"] = current_q["original_answer"]
+    if current_q.get("compacted_answer"):
+        answers_set["compacted_answer"] = current_q["compacted_answer"]
 
     await db[ANSWERS].update_one(
         {
@@ -2459,13 +2494,7 @@ async def submit_answer(session_id: str, question_id: str, answer: str) -> dict:
             "user_id": session.get("user_id"),
         },
         {
-            "$set": {
-                "question": current_question_text,
-                "answer": answer,
-                "difficulty": current_q.get("difficulty", "medium"),
-                "category": current_q.get("category", "general"),
-                "stored_at": utc_now(),
-            }
+            "$set": answers_set
         },
         upsert=True,
     )
@@ -2869,12 +2898,14 @@ async def get_session_qa(session_id: str) -> list:
             if not question_text or not answer_text:
                 continue
 
+            expected_val = q.get("expected_answer") or q.get("compacted_answer") or q.get("original_answer")
             qa_pairs.append({
                 "question_id": qid,
                 "question": question_text,
                 "answer": answer_text,
                 "difficulty": a.get("difficulty") or q.get("difficulty", "medium"),
                 "category": a.get("category") or q.get("category", "general"),
+                "expected_answer": expected_val,
             })
 
         if qa_pairs:
@@ -2885,12 +2916,14 @@ async def get_session_qa(session_id: str) -> list:
         q = await redis.hgetall(f"session:{session_id}:q:{qid}")
         a = await redis.hgetall(f"session:{session_id}:a:{qid}")
         if q and a:
+            expected_val = q.get("expected_answer") or q.get("compacted_answer") or q.get("original_answer")
             qa_pairs.append({
                 "question_id": qid,
                 "question": q.get("question", ""),
                 "answer": a.get("answer", ""),
                 "difficulty": q.get("difficulty", "medium"),
                 "category": q.get("category", "general"),
+                "expected_answer": expected_val,
             })
 
     return qa_pairs

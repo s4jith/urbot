@@ -102,6 +102,7 @@ export default function Navbar() {
               <NavLink href="/admin" icon={BarChart3} label="Dashboard" />
               <NavLink href="/admin/topics" icon={Tags} label="Topics" />
               <NavLink href="/admin/questions" icon={FileSignature} label="Questions" />
+              <NavLink href="/admin/questions/compact" icon={FileText} label="Compact Answers" />
               <NavLink href="/admin/job-descriptions" icon={Briefcase} label="Job Descriptions" />
               <NavLink href="/admin/group-tests" icon={Layers} label="Group Tests" />
               <NavLink href="/admin/chatbot" icon={MessageSquareDot} label="Student Filter" />

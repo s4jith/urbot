@@ -9,6 +9,9 @@ export interface AdminQuestion {
   difficulty: "easy" | "medium" | "hard";
   category?: string;
   subtopic?: string;
+  expected_answer?: string;
+  original_answer?: string;
+  compacted_answer?: string;
 }
 
 export interface TopPerformer {

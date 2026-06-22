@@ -1,4 +1,6 @@
 import json
+import csv
+import io
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from auth.jwt import require_role, get_current_user
@@ -212,6 +214,88 @@ async def upload_questions_pdf_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to import questions from PDF: {str(e)}")
+
+
+@router.post("/questions/upload-csv")
+async def upload_questions_csv_endpoint(
+    topic_id: str = Form(...),
+    file: UploadFile = File(...),
+    current_user: dict = Depends(require_role("admin")),
+):
+    """Upload a CSV of questions and original answers, compact answers using LLM, and store in DB (admin only)."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    if not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only CSV files are supported")
+
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large. Maximum 10MB")
+
+    try:
+        text_content = content.decode("utf-8-sig")
+    except Exception:
+        try:
+            text_content = content.decode("latin-1")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Failed to decode file content")
+
+    csv_reader = csv.reader(io.StringIO(text_content))
+    rows = list(csv_reader)
+    if not rows:
+        raise HTTPException(status_code=400, detail="CSV file is empty")
+
+    valid_rows = []
+    
+    # Try to skip header if it contains words like 'question', 'answer'
+    start_idx = 0
+    if len(rows) > 0:
+        first_row_str = "".join(rows[0]).lower()
+        if "question" in first_row_str or "answer" in first_row_str:
+            start_idx = 1
+
+    for row in rows[start_idx:]:
+        filtered_row = [col.strip() for col in row if col.strip()]
+        if len(filtered_row) >= 2:
+            valid_rows.append(row)
+
+    if not valid_rows:
+        raise HTTPException(status_code=400, detail="No valid question/answer rows found in CSV")
+
+    imported_count = 0
+    from utils.gemini import compact_answer_with_llm
+
+    for row in valid_rows:
+        category = None
+        if len(row) >= 3:
+            category = row[0].strip()
+            question_text = row[1].strip()
+            answer_text = row[2].strip()
+        else:
+            question_text = row[0].strip()
+            answer_text = row[1].strip()
+
+        if not question_text or not answer_text:
+            continue
+
+        # Call local LLM to compact the answer
+        compacted = await compact_answer_with_llm(answer_text)
+
+        await create_question(
+            topic_id=topic_id,
+            interview_type="topic",
+            question=question_text,
+            difficulty="medium",
+            category=category or "Technical",
+            subtopic=category or "General",
+            expected_answer=compacted,
+            original_answer=answer_text,
+            compacted_answer=compacted
+        )
+        imported_count += 1
+
+    return {"message": "CSV uploaded successfully", "imported_count": imported_count}
 
 
 @router.put("/questions/{question_id}")

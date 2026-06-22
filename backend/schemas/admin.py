@@ -31,6 +31,8 @@ class QuestionCreate(BaseModel):
     category: Optional[str] = None
     subtopic: Optional[str] = None
     expected_answer: Optional[str] = None
+    original_answer: Optional[str] = None
+    compacted_answer: Optional[str] = None
 
 
 class QuestionBatchCreate(BaseModel):
@@ -43,6 +45,8 @@ class QuestionUpdate(BaseModel):
     category: Optional[str] = None
     subtopic: Optional[str] = None
     expected_answer: Optional[str] = None
+    original_answer: Optional[str] = None
+    compacted_answer: Optional[str] = None
 
 
 class QuestionResponse(BaseModel):
@@ -59,6 +63,10 @@ class QuestionResponse(BaseModel):
     average_score: Optional[float] = 0.0
     followup_trigger_rate: Optional[float] = 0.0
     created_at: str
+    expected_answer: Optional[str] = None
+    original_answer: Optional[str] = None
+    compacted_answer: Optional[str] = None
+
 
 
 class TopicCreate(BaseModel):

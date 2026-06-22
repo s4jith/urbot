@@ -1209,13 +1209,15 @@ async def evaluate_interview(questions_and_answers: list, role_title: str) -> di
     for i, qa in enumerate(questions_and_answers, 1):
         question = (qa.get("question") or "").strip()
         answer = (qa.get("answer") or "").strip()
-        compact_qa.append(
-            {
-                "index": i,
-                "question": question[:260],
-                "answer": answer[:520],
-            }
-        )
+        expected = (qa.get("expected_answer") or "").strip()
+        item = {
+            "index": i,
+            "question": question[:260],
+            "answer": answer[:520],
+        }
+        if expected:
+            item["reference_expected_answer"] = expected[:400]
+        compact_qa.append(item)
 
     payload = {
         "role_title": role_title,
@@ -1233,6 +1235,8 @@ Scoring policy:
 1) Score conceptual correctness and depth, not verbosity.
 2) Penalize vague, uncertain, or incorrect technical claims.
 3) Reward concrete reasoning, trade-offs, and debugging clarity.
+4) If a question includes a "reference_expected_answer", treat it as the ground-truth benchmark. Candidates should demonstrate understanding matching the core concepts and terms in the reference.
+
 
 Return ONLY valid JSON object with this exact schema:
 {{
@@ -1338,3 +1342,33 @@ Rules:
         "weaknesses": ["Detailed AI evaluation was unavailable for this run"],
         "recommendations": ["Retry report generation to get full AI feedback"],
     }
+
+
+async def compact_answer_with_llm(original_answer: str) -> str:
+    """Condense/compact an answer using the local model (Ollama) into a concise benchmark."""
+    if not original_answer or not original_answer.strip():
+        return ""
+
+    prompt = f"""You are an expert technical interviewer.
+Condense the following reference answer into a concise, spoken-friendly benchmark expected answer (1-3 sentences or clear bullet points) that a candidate could reasonably say in a verbal mock interview.
+Keep the core technical depth, terminologies, and keywords, but remove unnecessary introductory phrases, meta-commentary, or filler sentences.
+
+Original Answer:
+---
+{original_answer.strip()}
+---
+
+Return ONLY the compacted answer text directly. Do NOT wrap it in JSON, markdown code blocks, quotes, or introductory text."""
+
+    try:
+        compacted = await call_ollama(prompt, max_attempts=2, request_timeout_seconds=20)
+        compacted = compacted.strip()
+        # Clean up any potential model preamble/quotes
+        if compacted.startswith('"') and compacted.endswith('"'):
+            compacted = compacted[1:-1].strip()
+        if compacted.startswith("Here is the compacted answer:") or compacted.startswith("Compacted Answer:"):
+            compacted = compacted.split(":", 1)[-1].strip()
+        return compacted or original_answer[:300]
+    except Exception:
+        return original_answer[:300]
+

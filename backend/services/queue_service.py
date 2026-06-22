@@ -179,6 +179,21 @@ async def _append_question_object(
     }
     if db_question_id:
         mapping["db_question_id"] = db_question_id
+        try:
+            from database import get_db
+            from models.collections import TOPIC_QUESTIONS
+            from bson import ObjectId
+            db = get_db()
+            doc = await db[TOPIC_QUESTIONS].find_one({"_id": ObjectId(db_question_id)})
+            if doc:
+                if doc.get("expected_answer"):
+                    mapping["expected_answer"] = doc["expected_answer"]
+                if doc.get("original_answer"):
+                    mapping["original_answer"] = doc["original_answer"]
+                if doc.get("compacted_answer"):
+                    mapping["compacted_answer"] = doc["compacted_answer"]
+        except Exception:
+            pass
     if subtopic:
         mapping["subtopic"] = subtopic
 
