@@ -968,7 +968,7 @@ No markdown, no extra text."""
     prompt = prompt_template.format(payload=json.dumps(payload, ensure_ascii=True), count=count)
 
     try:
-        result = _extract_json_array((await call_gemini(prompt)).strip())
+        result = _extract_json_array((await call_ollama(prompt)).strip())
         data = json.loads(result)
         if not isinstance(data, list):
             raise ValueError("Realtime round response is not a list")
@@ -1349,26 +1349,37 @@ async def compact_answer_with_llm(original_answer: str) -> str:
     if not original_answer or not original_answer.strip():
         return ""
 
-    prompt = f"""You are an expert technical interviewer.
-Condense the following reference answer into a concise, spoken-friendly benchmark expected answer (1-3 sentences or clear bullet points) that a candidate could reasonably say in a verbal mock interview.
-Keep the core technical depth, terminologies, and keywords, but remove unnecessary introductory phrases, meta-commentary, or filler sentences.
+    orig_clean = original_answer.strip()
+    words = orig_clean.split()
+    # If the answer is already extremely short (under 15 words), return it directly to save tokens & time.
+    if len(words) <= 15:
+        return orig_clean
+
+    prompt = f"""You are a technical document compressor. 
+Your task is to compress the reference answer below into a highly condensed, keyword-rich benchmark summary.
+
+Constraints:
+1. MUST be under 30 words in total.
+2. Retain only critical technical terms, keywords, and core logic.
+3. Eliminate all filler, explanations, examples, and descriptive fluff.
+4. Format as a single punchy sentence or short comparison.
 
 Original Answer:
 ---
-{original_answer.strip()}
+{orig_clean}
 ---
 
-Return ONLY the compacted answer text directly. Do NOT wrap it in JSON, markdown code blocks, quotes, or introductory text."""
+Return ONLY the compressed answer text. Do not wrap in quotes, markdown code blocks, or explain anything."""
 
     try:
-        compacted = await call_ollama(prompt, max_attempts=2, request_timeout_seconds=20)
+        compacted = await call_ollama(prompt, max_attempts=2, request_timeout_seconds=20, json_format=False)
         compacted = compacted.strip()
         # Clean up any potential model preamble/quotes
         if compacted.startswith('"') and compacted.endswith('"'):
             compacted = compacted[1:-1].strip()
         if compacted.startswith("Here is the compacted answer:") or compacted.startswith("Compacted Answer:"):
             compacted = compacted.split(":", 1)[-1].strip()
-        return compacted or original_answer[:300]
+        return compacted or orig_clean[:300]
     except Exception:
-        return original_answer[:300]
+        return orig_clean[:300]
 

@@ -123,6 +123,20 @@ async def create_question_endpoint(
     current_user: dict = Depends(require_role("admin")),
 ):
     """Create a new question (admin only)."""
+    original_answer = request.original_answer
+    compacted_answer = request.compacted_answer
+    expected_answer = request.expected_answer
+
+    if original_answer and not compacted_answer:
+        from utils.gemini import compact_answer_with_llm
+        try:
+            compacted_answer = await compact_answer_with_llm(original_answer)
+            expected_answer = compacted_answer
+        except Exception as e:
+            # fallback to original if LLM fails
+            compacted_answer = original_answer
+            expected_answer = original_answer
+
     result = await create_question(
         role_id=request.role_id,
         topic_id=request.topic_id,
@@ -131,7 +145,9 @@ async def create_question_endpoint(
         difficulty=request.difficulty,
         category=request.category,
         subtopic=request.subtopic,
-        expected_answer=request.expected_answer,
+        expected_answer=expected_answer or request.expected_answer,
+        original_answer=original_answer,
+        compacted_answer=compacted_answer,
     )
     return result
 
@@ -144,15 +160,19 @@ async def create_questions_batch_endpoint(
     """Create a batch of questions (admin only)."""
     inserted_count = 0
     for q in request.questions:
+        t_id = q.topic_id or request.topic_id
+        r_id = q.role_id or request.role_id
         await create_question(
-            role_id=q.role_id,
-            topic_id=q.topic_id,
+            role_id=r_id,
+            topic_id=t_id,
             interview_type=q.interview_type,
             question=q.question,
             difficulty=q.difficulty,
             category=q.category,
             subtopic=q.subtopic,
             expected_answer=q.expected_answer,
+            original_answer=q.original_answer,
+            compacted_answer=q.compacted_answer,
         )
         inserted_count += 1
     return {"inserted_count": inserted_count}
@@ -172,7 +192,7 @@ async def get_question_by_id_endpoint(
 
 
 @router.post("/questions/upload")
-async def upload_questions_pdf_endpoint(
+async def upload_questions_file_endpoint(
     interview_type: str = Form("resume"),
     role_id: str | None = Form(None),
     topic_id: str | None = Form(None),
@@ -180,12 +200,13 @@ async def upload_questions_pdf_endpoint(
     file: UploadFile = File(...),
     current_user: dict = Depends(require_role("admin")),
 ):
-    """Upload a PDF and extract interview questions (admin only)."""
+    """Upload a file (PDF, CSV, or Excel) and extract/parse interview questions and answers (admin only)."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
 
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported for question import")
+    filename_lower = file.filename.lower()
+    if not (filename_lower.endswith(".pdf") or filename_lower.endswith(".csv") or filename_lower.endswith(".xlsx") or filename_lower.endswith(".xls")):
+        raise HTTPException(status_code=400, detail="Only PDF, CSV, and Excel (.xlsx, .xls) files are supported")
 
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
@@ -200,20 +221,126 @@ async def upload_questions_pdf_endpoint(
         except Exception:
             parsed_subjects = [s.strip() for s in subjects.split(",") if s.strip()]
 
-    try:
-        result = await import_questions_from_pdf(
-            role_id=role_id,
-            topic_id=topic_id,
-            interview_type=interview_type,
-            subjects=parsed_subjects,
-            filename=file.filename,
-            file_content=content,
-        )
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to import questions from PDF: {str(e)}")
+    # 1. Handle PDF
+    if filename_lower.endswith(".pdf"):
+        try:
+            result = await import_questions_from_pdf(
+                role_id=role_id,
+                topic_id=topic_id,
+                interview_type=interview_type,
+                subjects=parsed_subjects,
+                filename=file.filename,
+                file_content=content,
+            )
+            return result
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to import questions from PDF: {str(e)}")
+
+    # 2. Handle CSV or Excel
+    rows = []
+    if filename_lower.endswith(".csv"):
+        try:
+            text_content = content.decode("utf-8-sig")
+        except Exception:
+            try:
+                text_content = content.decode("latin-1")
+            except Exception:
+                raise HTTPException(status_code=400, detail="Failed to decode file content")
+        csv_reader = csv.reader(io.StringIO(text_content))
+        rows = list(csv_reader)
+    else:
+        # Excel
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+            sheet = wb.active
+            for r in sheet.iter_rows(values_only=True):
+                rows.append(list(r))
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to parse Excel file: {str(e)}")
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    start_idx = 0
+    # Detect header
+    if len(rows) > 0:
+        first_row_str = "".join([str(col or "") for col in rows[0]]).lower()
+        if "question" in first_row_str or "answer" in first_row_str or "subtopic" in first_row_str:
+            start_idx = 1
+
+    valid_rows = []
+    for r in rows[start_idx:]:
+        cleaned_row = [str(cell).strip() if cell is not None else "" for cell in r]
+        non_empty = [c for c in cleaned_row if c]
+        if len(non_empty) >= 2:
+            valid_rows.append(cleaned_row)
+
+    if not valid_rows:
+        raise HTTPException(status_code=400, detail="No valid question/answer rows found in file")
+
+    docs = []
+    topic_name = ""
+    if interview_type == "topic" and topic_id:
+        from database import get_db
+        from models.collections import TOPICS
+        from bson import ObjectId
+        db = get_db()
+        topic_doc = await db[TOPICS].find_one({"_id": ObjectId(topic_id)})
+        if topic_doc:
+            topic_name = (topic_doc.get("name") or "").strip()
+
+    from utils.gemini import compact_answer_with_llm
+    from utils.helpers import utc_now
+
+    for row in valid_rows:
+        if len(row) >= 4:
+            subtopic = row[0]
+            q_text = row[1]
+            ans_text = row[2]
+            diff = row[3].lower()
+        elif len(row) == 3:
+            subtopic = row[0]
+            q_text = row[1]
+            ans_text = row[2]
+            diff = "medium"
+        else:
+            subtopic = "General"
+            q_text = row[0]
+            ans_text = row[1]
+            diff = "medium"
+
+        if not q_text or not ans_text:
+            continue
+
+        if diff not in {"easy", "medium", "hard"}:
+            diff = "medium"
+
+        compacted = await compact_answer_with_llm(ans_text)
+
+        docs.append({
+            "role_id": role_id,
+            "topic_id": topic_id,
+            "interview_type": interview_type,
+            "question": q_text,
+            "difficulty": diff,
+            "category": topic_name or "Technical",
+            "subtopic": subtopic or "General",
+            "original_answer": ans_text,
+            "compacted_answer": compacted,
+            "expected_answer": compacted,
+            "source": "file_upload",
+            "created_at": utc_now(),
+        })
+
+    return {
+        "questions": docs,
+        "subjects": parsed_subjects,
+        "interview_type": interview_type,
+        "topic_id": topic_id,
+    }
 
 
 @router.post("/questions/upload-csv")

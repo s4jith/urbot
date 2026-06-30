@@ -24,14 +24,14 @@ from models.collections import (
     USERS,
 )
 from services.group_test_service import _refresh_topic_statuses
-from utils.gemini import call_gemini
+from utils.ollama_client import call_ollama
 from utils.helpers import str_objectids
 
 
 # ─── Gemini query parser ─────────────────────────────────────────────────────
 
 async def _parse_query(query: str, group_tests: list[dict], jd_content: str | None) -> dict:
-    """Ask Gemini to extract structured filter parameters from a natural-language query."""
+    """Ask Ollama to extract structured filter parameters from a natural-language query."""
     # Sanitize: truncate and strip characters that could be used for prompt injection
     MAX_QUERY_LEN = 300
     sanitized_query = query.strip()[:MAX_QUERY_LEN]
@@ -74,7 +74,7 @@ async def _parse_query(query: str, group_tests: list[dict], jd_content: str | No
         "Return ONLY valid JSON."
     )
 
-    raw = await call_gemini(prompt)
+    raw = await call_ollama(prompt)
     cleaned = raw.strip()
     if cleaned.startswith("```"):
         cleaned = re.sub(r"```[a-z]*\n?", "", cleaned).strip().rstrip("`").strip()

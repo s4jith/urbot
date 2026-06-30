@@ -74,7 +74,7 @@ export interface AdminReportSummary {
 }
 
 export type Difficulty = "easy" | "medium" | "hard";
-export type EntryMode = "manual" | "pdf";
+export type EntryMode = "manual" | "ai";
 
 export interface QuestionLite {
   topic_id?: string;

@@ -7,13 +7,15 @@ import Navbar from "@/components/Navbar";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import api from "@/lib/api";
 import { Topic, EntryMode, Difficulty } from "@/types";
-import { ArrowLeft, BookOpen, Upload, Sparkles, Check, X, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, BookOpen, Upload, Sparkles, Check, X, Pencil, Trash2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 interface ExtractedQuestion {
   question: string;
   difficulty: "easy" | "medium" | "hard";
   subtopic?: string;
+  original_answer?: string;
+  compacted_answer?: string;
   expected_answer?: string;
 }
 
@@ -27,9 +29,14 @@ export default function AdminCreateQuestionPage() {
   // Manual Mode State
   const [topicId, setTopicId] = useState("");
   const [question, setQuestion] = useState("");
+  const [originalAnswer, setOriginalAnswer] = useState("");
   const [difficulty, setDifficulty] = useState<Difficulty>("medium");
   const [subtopic, setSubtopic] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // CSV Upload State
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvUploading, setCsvUploading] = useState(false);
 
   // PDF Upload & Review State
   const [uploadTopicId, setUploadTopicId] = useState("");
@@ -64,13 +71,22 @@ export default function AdminCreateQuestionPage() {
       toast.error("Please select a topic");
       return;
     }
+    if (!question.trim()) {
+      toast.error("Question is required");
+      return;
+    }
+    if (!originalAnswer.trim()) {
+      toast.error("Answer is required");
+      return;
+    }
 
     setSaving(true);
     try {
       await api.post("/admin/questions", {
         interview_type: "topic",
         topic_id: topicId,
-        question,
+        question: question.trim(),
+        original_answer: originalAnswer.trim(),
         difficulty,
         subtopic: subtopic.trim(),
       });
@@ -83,14 +99,20 @@ export default function AdminCreateQuestionPage() {
     }
   };
 
-  const importFromPdf = async (e: React.FormEvent) => {
+  const importFromFile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!uploadTopicId) {
       toast.error("Please select a topic");
       return;
     }
     if (!uploadFile) {
-      toast.error("Please choose a PDF file");
+      toast.error("Please choose a PDF, CSV, or Excel file");
+      return;
+    }
+
+    const name = uploadFile.name.toLowerCase();
+    if (!name.endsWith(".pdf") && !name.endsWith(".csv") && !name.endsWith(".xlsx") && !name.endsWith(".xls")) {
+      toast.error("Unsupported file type. Please upload PDF, CSV, or Excel.");
       return;
     }
 
@@ -107,7 +129,7 @@ export default function AdminCreateQuestionPage() {
 
       const questionsList = data.questions || [];
       if (questionsList.length === 0) {
-        toast.error("No questions could be extracted from PDF.");
+        toast.error("No questions could be extracted from the file.");
         return;
       }
 
@@ -116,13 +138,15 @@ export default function AdminCreateQuestionPage() {
           question: String(q.question || ""),
           difficulty: (q.difficulty || "medium") as "easy" | "medium" | "hard",
           subtopic: String(q.subtopic || ""),
+          original_answer: String(q.original_answer || ""),
+          compacted_answer: String(q.compacted_answer || ""),
           expected_answer: String(q.expected_answer || ""),
         }))
       );
       setIsReviewMode(true);
       toast.success(`Extracted ${questionsList.length} questions. Please review them below.`);
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || "Failed to extract questions from PDF");
+      toast.error(err.response?.data?.detail || "Failed to extract questions from file");
     } finally {
       setUploading(false);
     }
@@ -139,10 +163,13 @@ export default function AdminCreateQuestionPage() {
       await api.post("/admin/questions/batch", {
         topic_id: uploadTopicId,
         questions: extractedQuestions.map((q) => ({
+          topic_id: uploadTopicId,
           interview_type: "topic",
           question: q.question,
           difficulty: q.difficulty,
           subtopic: q.subtopic || "",
+          original_answer: q.original_answer || "",
+          compacted_answer: q.compacted_answer || "",
           expected_answer: q.expected_answer || "",
         })),
       });
@@ -227,15 +254,15 @@ export default function AdminCreateQuestionPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setEntryMode("pdf")}
+                    onClick={() => setEntryMode("ai")}
                     className={`px-3 py-1.5 rounded-lg text-sm border flex items-center gap-1 ${
-                      entryMode === "pdf"
+                      entryMode === "ai"
                         ? "bg-white text-black border-white"
                         : "bg-transparent text-muted border-border hover:text-white"
                     }`}
                   >
                     <Upload className="w-4 h-4" />
-                    Upload PDF + AI
+                    AI Question Upload
                   </button>
                 </div>
               )}
@@ -292,15 +319,30 @@ export default function AdminCreateQuestionPage() {
                             </div>
                           </div>
                         </div>
-                        <div className="space-y-1">
-                          <label className="text-xs text-muted font-medium">Expected Answer</label>
-                          <textarea
-                            value={q.expected_answer || ""}
-                            onChange={(e) => handleEditExtracted(index, "expected_answer", e.target.value)}
-                            rows={2}
-                            className="w-full px-3 py-2 rounded-lg border border-border bg-black/20 text-sm resize-none"
-                            placeholder="Describe expected correct response..."
-                          />
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted font-medium">Original Answer</label>
+                            <textarea
+                              value={q.original_answer || ""}
+                              onChange={(e) => handleEditExtracted(index, "original_answer", e.target.value)}
+                              rows={3}
+                              className="w-full px-3 py-2 rounded-lg border border-border bg-black/20 text-sm resize-none text-muted"
+                              placeholder="Original answer from document..."
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted font-medium">Compacted Reference Answer</label>
+                            <textarea
+                              value={q.expected_answer || ""}
+                              onChange={(e) => {
+                                handleEditExtracted(index, "expected_answer", e.target.value);
+                                handleEditExtracted(index, "compacted_answer", e.target.value);
+                              }}
+                              rows={3}
+                              className="w-full px-3 py-2 rounded-lg border border-border bg-black/20 text-sm resize-none"
+                              placeholder="Compacted answer..."
+                            />
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -329,7 +371,12 @@ export default function AdminCreateQuestionPage() {
                 </div>
               ) : entryMode === "manual" ? (
                 <form onSubmit={createManualQuestion} className="space-y-4">
-                  <select value={topicId} onChange={(e) => setTopicId(e.target.value)} required>
+                  <select
+                    value={topicId}
+                    onChange={(e) => setTopicId(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-black/20 text-sm focus:outline-none focus:border-primary transition-colors"
+                  >
                     <option value="">Select Topic</option>
                     {topics.map((topic) => (
                       <option key={topic.id} value={topic.id}>
@@ -349,10 +396,22 @@ export default function AdminCreateQuestionPage() {
                     onChange={(e) => setQuestion(e.target.value)}
                     rows={4}
                     required
-                    placeholder="Enter interview question"
-                    className="resize-none"
+                    placeholder="Enter interview question (Compulsory)"
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-black/20 text-sm resize-none focus:outline-none focus:border-primary transition-colors"
                   />
-                  <select value={difficulty} onChange={(e) => setDifficulty(e.target.value as Difficulty)}>
+                  <textarea
+                    value={originalAnswer}
+                    onChange={(e) => setOriginalAnswer(e.target.value)}
+                    rows={4}
+                    required
+                    placeholder="Enter reference answer (Compulsory - will be compacted automatically by local LLM)"
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-black/20 text-sm resize-none focus:outline-none focus:border-primary transition-colors"
+                  />
+                  <select
+                    value={difficulty}
+                    onChange={(e) => setDifficulty(e.target.value as Difficulty)}
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-black/20 text-sm focus:outline-none focus:border-primary transition-colors"
+                  >
                     <option value="easy">Easy</option>
                     <option value="medium">Medium</option>
                     <option value="hard">Hard</option>
@@ -367,30 +426,57 @@ export default function AdminCreateQuestionPage() {
                   </button>
                 </form>
               ) : (
-                <form onSubmit={importFromPdf} className="space-y-4">
-                  <select value={uploadTopicId} onChange={(e) => setUploadTopicId(e.target.value)} required>
-                    <option value="">Select Topic</option>
-                    {topics.map((topic) => (
-                      <option key={topic.id} value={topic.id}>
-                        {topic.name}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-muted">
-                    Upload a PDF containing questions. AI will extract and classify them into subtopics for review.
-                  </p>
-                  <input
-                    type="file"
-                    accept=".pdf,application/pdf"
-                    onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                    required
-                  />
+                <form onSubmit={importFromFile} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-muted mb-1">Select Target Topic</label>
+                    <select
+                      value={uploadTopicId}
+                      onChange={(e) => setUploadTopicId(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 rounded-lg border border-border bg-black/20 text-sm focus:outline-none focus:border-primary transition-colors"
+                    >
+                      <option value="">Select Topic</option>
+                      {topics.map((topic) => (
+                        <option key={topic.id} value={topic.id}>
+                          {topic.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted mb-1">Select File (PDF, CSV, or Excel)</label>
+                    <div className="relative border-2 border-dashed border-border hover:border-primary/50 transition-colors rounded-xl p-6 text-center cursor-pointer bg-black/10">
+                      <input
+                        type="file"
+                        onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                        accept=".pdf,.csv,.xlsx,.xls,application/pdf,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                        required
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                        disabled={uploading}
+                      />
+                      <Upload className="w-10 h-10 text-muted mx-auto mb-2" />
+                      <p className="text-sm font-medium truncate">
+                        {uploadFile ? uploadFile.name : "Drag & drop or click to select PDF, CSV, or Excel"}
+                      </p>
+                      <p className="text-xs text-muted mt-1">Accepts PDF questions, 2-column CSV/Excel (Q, A), or 3-column (Subtopic, Q, A)</p>
+                    </div>
+                  </div>
                   <button
                     type="submit"
                     disabled={uploading}
-                    className="px-5 py-2.5 rounded-lg bg-white text-black text-sm font-semibold hover:bg-gray-200 disabled:opacity-50 transition-colors"
+                    className="w-full py-2.5 rounded-lg bg-white text-black text-sm font-semibold hover:bg-gray-200 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
                   >
-                    {uploading ? "Uploading and extracting..." : "Generate Questions from PDF"}
+                    {uploading ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        AI extracting & compacting answers...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" />
+                        Generate & Compact with AI
+                      </>
+                    )}
                   </button>
                 </form>
               )}

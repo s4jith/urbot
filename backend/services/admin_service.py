@@ -5,7 +5,8 @@ from datetime import datetime
 from database import get_db
 from models.collections import JOB_ROLES, ROLE_REQUIREMENTS, QUESTIONS, TOPICS, TOPIC_QUESTIONS, SESSIONS, USERS, RESULTS, RESUMES, SKILLS, ANSWERS, JOB_DESCRIPTIONS, DEPARTMENTS, APP_SETTINGS, GEMINI_KEYS
 from utils.helpers import utc_now, str_objectid, str_objectids
-from utils.gemini import call_gemini
+from utils.gemini import call_gemini, compact_answer_with_llm
+from utils.ollama_client import call_ollama
 from utils.resume_text import extract_resume_text
 
 
@@ -325,21 +326,22 @@ async def import_questions_from_pdf(
         topic_name = (topic_doc.get("name") or "").strip()
 
     if interview_type == "topic":
-        prompt = f"""You are extracting topic-specific interview questions from a document.
+        prompt = f"""You are extracting topic-specific interview questions and answers from a document.
 
 Target topic: {topic_name or "General"}
 
 Rules:
-1. Extract only actual interview questions relevant to the target topic.
-2. Automatically classify each question into a highly specific subtopic (e.g., for Topic DBMS, subtopics could be Transactions, Joins, Indexing, Normalization).
-3. Ignore headings, instructions, answers, explanations, and duplicates.
-4. Keep each question concise and interview-ready.
+1. Extract actual interview questions relevant to the target topic AND their corresponding answers (if present in the text) from the document.
+2. If an answer/explanation is provided for the question in the document, extract it. If no answer is present, formulate a correct, detailed answer to use as the reference answer.
+3. Automatically classify each question into a highly specific subtopic (e.g., for Topic DBMS, subtopics could be Transactions, Joins, Indexing, Normalization).
+4. Keep each question and answer clean, complete, and concise.
 5. Assign a difficulty: easy, medium, or hard.
+6. Extract EVERY single question and answer present in the document. Do NOT skip, omit, or summarize them. Walk through the entire document from start to finish and extract all of them.
 
 Return ONLY valid JSON in this format:
 {{
   "questions": [
-    {{"question": "...", "subtopic": "...", "difficulty": "medium"}}
+    {{"question": "...", "subtopic": "...", "difficulty": "medium", "original_answer": "..."}}
   ]
 }}
 
@@ -348,22 +350,22 @@ Document text:
 {text}
 ---"""
     else:
-        prompt = f"""You are extracting interview questions from a document.
+        prompt = f"""You are extracting interview questions and answers from a document.
 
 Allowed subjects (must choose one of these for each question): {', '.join(clean_subjects)}
 
 Rules:
-1. Extract only actual interview questions from the document.
-2. Ignore headings, instructions, answers, explanations, and duplicates.
-3. Assign each extracted question to ONE allowed subject from the list above.
-4. Automatically classify each question into a specific subtopic.
-5. Assign a difficulty: easy, medium, or hard.
-6. Keep question text clean and concise.
+1. Extract actual interview questions from the document AND their corresponding answers. If no answer is present, formulate a correct, detailed answer to use as the reference answer.
+2. Assign each extracted question to ONE allowed subject from the list above.
+3. Automatically classify each question into a specific subtopic.
+4. Assign a difficulty: easy, medium, or hard.
+5. Keep question and answer text clean and concise.
+6. Extract EVERY single question and answer present in the document. Do NOT skip, omit, or summarize them. Walk through the entire document from start to finish and extract all of them.
 
 Return ONLY valid JSON in this format:
 {{
   "questions": [
-    {{"question": "...", "subject": "...", "subtopic": "...", "difficulty": "medium"}}
+    {{"question": "...", "subject": "...", "subtopic": "...", "difficulty": "medium", "original_answer": "..."}}
   ]
 }}
 
@@ -372,7 +374,7 @@ Document text:
 {text}
 ---"""
 
-    raw = await call_gemini(prompt)
+    raw = await call_ollama(prompt, request_timeout_seconds=120)
     parsed_text = _extract_json_object(raw)
     try:
         parsed = json.loads(parsed_text)
@@ -408,6 +410,8 @@ Document text:
             difficulty = "medium"
 
         subtopic = (item.get("subtopic") or "").strip()
+        orig_ans = (item.get("original_answer") or "").strip()
+        compacted = await compact_answer_with_llm(orig_ans) if orig_ans else ""
 
         key = q_text.lower()
         if key in seen:
@@ -423,6 +427,9 @@ Document text:
                 "difficulty": difficulty,
                 "category": subject,
                 "subtopic": subtopic,
+                "original_answer": orig_ans,
+                "compacted_answer": compacted,
+                "expected_answer": compacted,
                 "source": "pdf_upload",
                 "created_at": utc_now(),
             }

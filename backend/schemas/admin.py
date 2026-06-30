@@ -36,6 +36,8 @@ class QuestionCreate(BaseModel):
 
 
 class QuestionBatchCreate(BaseModel):
+    topic_id: Optional[str] = None
+    role_id: Optional[str] = None
     questions: List[QuestionCreate]
 
 

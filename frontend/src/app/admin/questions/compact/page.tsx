@@ -12,13 +12,6 @@ export default function CompactAnswersPage() {
   const [questions, setQuestions] = useState<AdminQuestion[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [loading, setLoading] = useState(true);
-  
-  // Upload state
-  const [selectedTopic, setSelectedTopic] = useState("");
-  const [csvFile, setCsvFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState("");
-
   // Filters
   const [filterTopic, setFilterTopic] = useState("");
   const [page, setPage] = useState(1);
@@ -54,9 +47,6 @@ export default function CompactAnswersPage() {
       const topicsRes = await api.get("/admin/topics");
       const fetchedTopics = topicsRes.data.topics || [];
       setTopics(fetchedTopics);
-      if (fetchedTopics.length > 0) {
-        setSelectedTopic(fetchedTopics[0].id);
-      }
     } catch (err) {
       console.error("Failed to fetch topics", err);
       toast.error("Failed to fetch topics");
@@ -96,56 +86,6 @@ export default function CompactAnswersPage() {
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      if (!file.name.toLowerCase().endsWith(".csv")) {
-        toast.error("Please select a valid CSV file");
-        return;
-      }
-      setCsvFile(file);
-    }
-  };
-
-  const handleUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedTopic) {
-      toast.error("Please select a topic first");
-      return;
-    }
-    if (!csvFile) {
-      toast.error("Please select a CSV file first");
-      return;
-    }
-
-    setUploading(true);
-    setUploadProgress("Reading CSV and generating compact answers via LLM...");
-
-    const formData = new FormData();
-    formData.append("topic_id", selectedTopic);
-    formData.append("file", csvFile);
-
-    try {
-      const res = await api.post("/admin/questions/upload-csv", formData, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
-      });
-      toast.success(res.data.message || `Uploaded and compacted ${res.data.imported_count} questions successfully!`);
-      setCsvFile(null);
-      // Reset input element
-      const fileInput = document.getElementById("csv-file-input") as HTMLInputElement;
-      if (fileInput) fileInput.value = "";
-      fetchQuestions(filterTopic);
-    } catch (err: any) {
-      const detail = err.response?.data?.detail || "Upload and compaction failed";
-      toast.error(detail);
-      console.error("CSV upload error", err);
-    } finally {
-      setUploading(false);
-      setUploadProgress("");
-    }
-  };
 
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this question?")) return;
@@ -211,87 +151,15 @@ export default function CompactAnswersPage() {
                   <h1 className="text-2xl font-bold tracking-tight">LLM Compact Answers</h1>
                 </div>
                 <p className="text-sm text-muted mt-2 max-w-2xl leading-relaxed">
-                  Upload topic Q&A sheets via CSV. The local LLM will automatically extract and compact answers into concise, spoken benchmarks for interview scoring.
+                  Manage and review reference answers. The local LLM compactor helps establish concise, spoken benchmarks to ensure interview scoring consistency.
                 </p>
               </div>
             </div>
           </section>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Left/Top Sidebar: CSV Ingestion */}
+            {/* Left/Top Sidebar: Filters only */}
             <div className="space-y-6 lg:col-span-1">
-              <section className="rounded-2xl border border-border bg-card p-5 shadow-lg">
-                <h2 className="font-semibold text-lg mb-4 flex items-center gap-2">
-                  <Upload className="w-4 h-4 text-primary" />
-                  Import CSV Questions
-                </h2>
-
-                <form onSubmit={handleUpload} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-medium text-muted mb-1">Select Target Topic</label>
-                    <select
-                      value={selectedTopic}
-                      onChange={(e) => setSelectedTopic(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border border-border bg-black/20 text-sm focus:outline-none focus:border-primary transition-colors"
-                      disabled={uploading}
-                    >
-                      {topics.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-muted mb-1">Select CSV File</label>
-                    <div className="relative border-2 border-dashed border-border hover:border-primary/50 transition-colors rounded-xl p-4 text-center cursor-pointer">
-                      <input
-                        type="file"
-                        id="csv-file-input"
-                        onChange={handleFileChange}
-                        accept=".csv"
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                        disabled={uploading}
-                      />
-                      <Upload className="w-8 h-8 text-muted mx-auto mb-2" />
-                      <p className="text-xs font-medium truncate">
-                        {csvFile ? csvFile.name : "Drag & drop or click to select"}
-                      </p>
-                      <p className="text-[10px] text-muted mt-1">Accepts 2 columns (Q, A) or 3 columns (Subtopic, Q, A)</p>
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="w-full py-2.5 rounded-lg bg-primary hover:bg-primary-hover text-white text-sm font-semibold transition-all shadow-md shadow-primary/10 flex items-center justify-center gap-2 disabled:opacity-50"
-                    disabled={uploading || !csvFile}
-                  >
-                    {uploading ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        Processing...
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="w-4 h-4" />
-                        Upload & Compact
-                      </>
-                    )}
-                  </button>
-                </form>
-
-                {uploading && (
-                  <div className="mt-4 p-3 rounded-lg bg-primary/10 border border-primary/20 flex items-start gap-2.5 animate-pulse">
-                    <RefreshCw className="w-4 h-4 text-primary shrink-0 mt-0.5 animate-spin" />
-                    <div>
-                      <p className="text-xs font-semibold text-primary">Local LLM Active</p>
-                      <p className="text-[11px] text-muted mt-0.5 leading-normal">{uploadProgress}</p>
-                    </div>
-                  </div>
-                )}
-              </section>
-
               {/* Filters */}
               <section className="rounded-2xl border border-border bg-card p-5 shadow-lg">
                 <h2 className="font-semibold text-base mb-3 flex items-center gap-2">
@@ -330,7 +198,7 @@ export default function CompactAnswersPage() {
                 <div className="rounded-2xl border border-border bg-card p-12 text-center text-muted shadow-lg">
                   <AlertCircle className="w-12 h-12 text-muted/40 mx-auto mb-3" />
                   <p className="font-medium text-foreground">No compact reference questions found.</p>
-                  <p className="text-xs text-muted mt-1">Upload a CSV using the form to populate reference answers.</p>
+                  <p className="text-xs text-muted mt-1">Create a question with an answer or import a CSV/Excel file in the Question creation page to populate reference answers.</p>
                 </div>
               ) : (
                 <div className="space-y-4">

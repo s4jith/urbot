@@ -56,6 +56,8 @@ export default function Navbar() {
     const isActive =
       href === "/admin"
         ? pathname === "/admin"
+        : href === "/admin/questions"
+        ? pathname === "/admin/questions" || (pathname.startsWith("/admin/questions/") && !pathname.startsWith("/admin/questions/compact"))
         : pathname === href || pathname.startsWith(`${href}/`);
     return (
       <Link

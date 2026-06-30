@@ -26,6 +26,8 @@ async def call_ollama(
     *,
     max_attempts: int = 3,
     request_timeout_seconds: float | None = None,
+    json_format: bool = True,
+    options: dict | None = None,
 ) -> str:
     """Call Ollama API with a prompt and optional system instruction."""
     started_at = perf_counter()
@@ -35,8 +37,19 @@ async def call_ollama(
         "model": settings.OLLAMA_MODEL,
         "prompt": prompt,
         "stream": False,
-        "format": "json" # Enforce JSON output for interview parsing
     }
+    if json_format:
+        payload["format"] = "json" # Enforce JSON output for interview parsing
+    
+    # Provide defaults optimized for large extractions, low temperature, and rich context length
+    default_opts = {
+        "num_ctx": 16384,
+        "num_predict": 4096,
+        "temperature": 0.1,
+    }
+    if options:
+        default_opts.update(options)
+    payload["options"] = default_opts
     
     if system_instruction:
         payload["system"] = system_instruction
