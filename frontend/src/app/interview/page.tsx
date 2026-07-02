@@ -140,6 +140,11 @@ function InterviewContent() {
   const [voiceGender, setVoiceGender] = useState<SpeechVoiceGender>("female");
   const [voiceReady, setVoiceReady] = useState(false);
 
+  const [isFullScreen, setIsFullScreen] = useState(false);
+  const [tabSwitches, setTabSwitches] = useState(0);
+  const [showStartOverlay, setShowStartOverlay] = useState(true);
+  const lastSwitchTimeRef = useRef<number>(0);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
@@ -259,7 +264,7 @@ function InterviewContent() {
   }, [isComplete, sessionId]);
 
   useEffect(() => {
-    if (!timerEnabled || isComplete || isTimeUp) return;
+    if (!timerEnabled || isComplete || isTimeUp || showStartOverlay) return;
     if (timeLeft <= 0) { setIsTimeUp(true); stopRecording(); stopSpeaking(); return; }
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
@@ -268,7 +273,94 @@ function InterviewContent() {
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [timerEnabled, timeLeft, isComplete, isTimeUp]);
+  }, [timerEnabled, timeLeft, isComplete, isTimeUp, showStartOverlay]);
+
+  const enterFullScreenAndStart = async () => {
+    try {
+      const docEl = document.documentElement;
+      if (docEl.requestFullscreen) {
+        await docEl.requestFullscreen();
+      } else if ((docEl as any).mozRequestFullScreen) {
+        await (docEl as any).mozRequestFullScreen();
+      } else if ((docEl as any).webkitRequestFullscreen) {
+        await (docEl as any).webkitRequestFullscreen();
+      } else if ((docEl as any).msRequestFullscreen) {
+        await (docEl as any).msRequestFullscreen();
+      }
+      setIsFullScreen(true);
+      setShowStartOverlay(false);
+    } catch (err) {
+      console.error("Failed to enter fullscreen:", err);
+      setShowStartOverlay(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleFullScreenChange = () => {
+      const isFS = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (document as any).msFullscreenElement
+      );
+      setIsFullScreen(isFS);
+      if (!isFS && !isComplete && !showStartOverlay) {
+        toast.warning("Please remain in full-screen mode during the interview.");
+      }
+    };
+
+    document.addEventListener("fullscreenchange", handleFullScreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullScreenChange);
+    document.addEventListener("mozfullscreenchange", handleFullScreenChange);
+    document.addEventListener("MSFullscreenChange", handleFullScreenChange);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullScreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullScreenChange);
+      document.removeEventListener("mozfullscreenchange", handleFullScreenChange);
+      document.removeEventListener("MSFullscreenChange", handleFullScreenChange);
+    };
+  }, [isComplete, showStartOverlay]);
+
+  const handleTabSwitch = async () => {
+    const now = Date.now();
+    if (now - lastSwitchTimeRef.current < 1000) return;
+    lastSwitchTimeRef.current = now;
+
+    setTabSwitches((prev) => {
+      const newCount = prev + 1;
+      toast.error(`Warning: Tab switch detected! (Count: ${newCount}) This behavior is reported to the administrator.`, {
+        duration: 5000,
+      });
+      if (sessionId) {
+        api.post(`/interview/session/${sessionId}/tab-switches`, { count: newCount })
+          .catch((err) => console.error("Failed to report tab switch", err));
+      }
+      return newCount;
+    });
+  };
+
+  useEffect(() => {
+    if (showStartOverlay || isComplete) return;
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        handleTabSwitch();
+      }
+    };
+
+    const onBlur = () => {
+      handleTabSwitch();
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("blur", onBlur);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [showStartOverlay, isComplete, sessionId]);
 
   // ── Actions ──
 
@@ -421,6 +513,56 @@ function InterviewContent() {
 
   if (isComplete) {
     return <CompletionScreen onViewReport={viewReport} generatingReport={generatingReport} returnTo={returnTo} />;
+  }
+
+  if (showStartOverlay) {
+    return (
+      <ProtectedRoute requiredRole="student">
+        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+          <div className="max-w-md w-full bg-slate-800/90 border border-slate-700/50 rounded-2xl p-8 text-center text-white shadow-2xl backdrop-blur-md">
+            <div className="w-16 h-16 bg-primary/25 rounded-2xl flex items-center justify-center mx-auto mb-6">
+              <Sparkles className="w-8 h-8 text-primary animate-pulse" />
+            </div>
+            <h2 className="text-2xl font-black mb-4 tracking-tight">Ready to Start Your Interview?</h2>
+            <p className="text-slate-300 text-sm mb-6 leading-relaxed">
+              To ensure academic integrity, this interview runs strictly in <strong>Full-Screen mode</strong>.
+              Tab switching is monitored and recorded.
+            </p>
+            <button
+              onClick={enterFullScreenAndStart}
+              className="w-full py-4 bg-primary hover:bg-secondary text-white font-bold rounded-xl transition-all shadow-lg active:scale-95 text-base"
+            >
+              Enter Full-Screen &amp; Start
+            </button>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
+
+  if (!isFullScreen) {
+    return (
+      <ProtectedRoute requiredRole="student">
+        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+          <div className="max-w-md w-full bg-slate-800/95 border border-rose-500/30 rounded-2xl p-8 text-center text-white shadow-2xl backdrop-blur-md">
+            <div className="w-16 h-16 bg-rose-500/25 rounded-2xl flex items-center justify-center mx-auto mb-6">
+              <AlertTriangle className="w-8 h-8 text-rose-500 animate-bounce" />
+            </div>
+            <h2 className="text-2xl font-black mb-3 text-rose-400 tracking-tight">Fullscreen Exited</h2>
+            <p className="text-slate-300 text-sm mb-6 leading-relaxed">
+              Your interview is currently paused because you exited full-screen mode.
+              Please return to full-screen mode to resume.
+            </p>
+            <button
+              onClick={enterFullScreenAndStart}
+              className="w-full py-4 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-all shadow-lg active:scale-95 text-base"
+            >
+              Resume in Full-Screen
+            </button>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
   }
 
   // ── 30/70 Split Layout ────────────────────────────────────────────────────

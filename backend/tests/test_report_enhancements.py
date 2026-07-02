@@ -90,3 +90,63 @@ async def test_report_metric_computation():
         
     await db[SESSIONS].delete_many({"session_id": session_id})
     await db[RESULTS].delete_many({"session_id": session_id})
+
+
+@pytest.mark.asyncio
+async def test_tab_switches_persistence():
+    db = get_db()
+    session_id = "test_tab_sess"
+    user_id = "test_user_id"
+
+    await db[SESSIONS].delete_many({"session_id": session_id})
+    await db[RESULTS].delete_many({"session_id": session_id})
+
+    # Insert mock session
+    await db[SESSIONS].insert_one({
+        "session_id": session_id,
+        "user_id": user_id,
+        "role_title": "Frontend Developer",
+        "status": "completed",
+        "started_at": datetime.now().isoformat()
+    })
+
+    # Call update_tab_switches
+    from services.interview_service import update_tab_switches
+    success = await update_tab_switches(session_id, 3)
+    assert success is True
+
+    # Verify session has it
+    session_doc = await db[SESSIONS].find_one({"session_id": session_id})
+    assert session_doc is not None
+    assert session_doc.get("tab_switches") == 3
+
+    # Generate report and verify report copies it
+    from unittest.mock import patch, AsyncMock
+    mock_eval = {
+        "overall_score": 85,
+        "technical_score": 88,
+        "grammatical_score": 82,
+        "detailed_scores": [{"question": "Q1", "answer": "Ans1", "score": 80, "feedback": "Ok"}],
+        "strengths": [], "weaknesses": [], "recommendations": []
+    }
+    with patch("services.evaluation_service.evaluate_interview", new_callable=AsyncMock) as mock_evaluate, \
+         patch("services.evaluation_service.get_session_qa", new_callable=AsyncMock) as mock_qa, \
+         patch("services.evaluation_service.get_redis") as mock_redis_func:
+        mock_evaluate.return_value = mock_eval
+        mock_qa.return_value = [{"question": "Q1", "answer": "Ans1", "difficulty": "medium", "category": "General"}]
+        
+        mock_redis = AsyncMock()
+        mock_redis.lrange.return_value = []
+        mock_redis.hgetall.return_value = {}
+        mock_redis_func.return_value = mock_redis
+
+        report_dict = await generate_report(session_id, user_id)
+        assert report_dict.get("tab_switches") == 3
+
+    # Verify in results DB
+    result_doc = await db[RESULTS].find_one({"session_id": session_id})
+    assert result_doc is not None
+    assert result_doc.get("tab_switches") == 3
+
+    await db[SESSIONS].delete_many({"session_id": session_id})
+    await db[RESULTS].delete_many({"session_id": session_id})

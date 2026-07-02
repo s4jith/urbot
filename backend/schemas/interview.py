@@ -89,4 +89,5 @@ class InterviewReport(BaseModel):
     hiring_simulation: Optional[Dict[str, Any]] = None
     progression: Optional[Dict[str, Any]] = None
     history: Optional[List[Dict[str, Any]]] = None
+    tab_switches: Optional[int] = 0
 

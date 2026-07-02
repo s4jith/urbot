@@ -7,7 +7,7 @@ import weakref
 from time import perf_counter
 from bson import ObjectId
 from database import get_db, get_redis
-from models.collections import SESSIONS, USERS, JOB_ROLES, SKILLS, QUESTIONS, TOPICS, TOPIC_QUESTIONS, RESUMES, JD_VERIFICATIONS, ANSWERS
+from models.collections import SESSIONS, USERS, JOB_ROLES, SKILLS, QUESTIONS, TOPICS, TOPIC_QUESTIONS, RESUMES, JD_VERIFICATIONS, ANSWERS, RESULTS
 from utils.helpers import generate_id, utc_now, str_objectid
 from utils.skills import normalize_skill_list, build_interview_focus_skills
 from services.interview_graph import run_interview_graph
@@ -2937,3 +2937,20 @@ async def cleanup_interview_local_state(session_id: str) -> None:
         f"session:{session_id}:pregen_in_flight",
     )
     # _POST_SUBMIT_LOCKS uses WeakValueDictionary — GC handles cleanup automatically.
+
+
+async def update_tab_switches(session_id: str, count: int) -> bool:
+    db = get_db()
+    # Update SESSIONS collection
+    session_result = await db[SESSIONS].update_one(
+        {"session_id": session_id},
+        {"$set": {"tab_switches": count}}
+    )
+    
+    # Also update RESULTS if report is already generated
+    await db[RESULTS].update_one(
+        {"session_id": session_id},
+        {"$set": {"tab_switches": count}}
+    )
+    
+    return session_result.modified_count > 0 or session_result.matched_count > 0

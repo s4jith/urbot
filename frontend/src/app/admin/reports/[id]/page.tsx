@@ -16,6 +16,7 @@ import {
   BarChart3,
   ArrowLeft,
   Activity,
+  AlertTriangle,
 } from "lucide-react";
 
 export default function AdminReportDetailPage() {
@@ -95,7 +96,22 @@ export default function AdminReportDetailPage() {
               <span className={`text-4xl font-bold ${scoreColor(report.overall_score)}`}>{report.overall_score}</span>
             </div>
             <p className="text-lg font-semibold">Overall Score</p>
-            <p className="text-xs text-muted mb-4">{report.total_questions} questions answered</p>
+            <p className="text-xs text-muted mb-3">{report.total_questions} questions answered</p>
+
+            {report.tab_switches !== undefined && (
+              <div className="mb-4">
+                {report.tab_switches > 0 ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 border border-rose-200 text-rose-600 text-xs font-extrabold shadow-sm">
+                    <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />
+                    {report.tab_switches} Tab Switch{report.tab_switches > 1 ? "es" : ""} Detected
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-600 text-xs font-extrabold shadow-sm">
+                    ✓ Clean Session (0 Tab Switches)
+                  </span>
+                )}
+              </div>
+            )}
 
             <div className="flex justify-center items-center gap-6 max-w-sm mx-auto mt-2 pt-3 border-t border-slate-100 dark:border-slate-800/50">
               <div className="text-center flex-1">

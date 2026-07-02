@@ -64,6 +64,7 @@ export interface AdminReportSummary {
   completed_at: string;
   session_status: string;
   is_quit: boolean;
+  tab_switches?: number;
   generation_stats?: {
     gemini_calls?: number;
     gemini_questions?: number;

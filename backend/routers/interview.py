@@ -16,6 +16,7 @@ from services.interview_service import (
     submit_answer,
     get_next_question,
     quit_interview,
+    update_tab_switches,
 )
 from services.evaluation_service import generate_report
 from services.latency_service import get_latency_metrics, reset_latency_metrics
@@ -220,3 +221,17 @@ async def get_interview_report(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/session/{session_id}/tab-switches")
+async def update_tab_switches_endpoint(
+    session_id: str,
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """Update tab switches count for the interview session."""
+    count = body.get("count", 0)
+    success = await update_tab_switches(session_id=session_id, count=count)
+    if not success:
+        raise HTTPException(status_code=404, detail="Interview session not found")
+    return {"message": "Tab switches count updated successfully", "count": count}

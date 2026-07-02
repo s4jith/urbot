@@ -525,6 +525,7 @@ async def generate_report(session_id: str, user_id: str) -> dict:
         "session_status": session_status,
         "is_quit": session_status in {"quit", "quit_with_report"},
         "quit_at": quit_at,
+        "tab_switches": session.get("tab_switches", 0),
         "overall_score": overall_score,
         "technical_score": evaluation.get("technical_score"),
         "grammatical_score": evaluation.get("grammatical_score"),

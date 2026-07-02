@@ -86,6 +86,7 @@ export interface InterviewReport {
     completed_at: string;
     role_title: string;
   }[] | null;
+  tab_switches?: number;
   completed_at: string;
 }
 
