@@ -205,3 +205,17 @@ class GeminiKeyUpdate(BaseModel):
     is_active: Optional[bool] = None
     description: Optional[str] = None
 
+
+class StoredMatchingUpdate(BaseModel):
+    enabled: bool
+
+
+class ApprovePendingAnswer(BaseModel):
+    score: int
+    feedback: str
+
+
+class UpdateApprovedEvaluation(BaseModel):
+    score: int
+    feedback: str
+

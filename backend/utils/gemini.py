@@ -1174,7 +1174,7 @@ No markdown, no extra text."""
 
 
 async def evaluate_interview(questions_and_answers: list, role_title: str) -> dict:
-    """Batch evaluate all interview Q&A pairs using Gemini."""
+    """Batch evaluate all interview Q&A pairs using Gemini/Ollama, supporting stored evaluations."""
 
     def _clamp_score(value, default: int = 50) -> int:
         try:
@@ -1196,6 +1196,9 @@ async def evaluate_interview(questions_and_answers: list, role_title: str) -> di
             return 74
         return 64
 
+    def normalize_answer(text: str) -> str:
+        return " ".join((text or "").strip().lower().split())
+
     if not questions_and_answers:
         return {
             "overall_score": 50,
@@ -1205,28 +1208,71 @@ async def evaluate_interview(questions_and_answers: list, role_title: str) -> di
             "recommendations": ["Complete the interview and generate report again"],
         }
 
-    compact_qa = []
-    for i, qa in enumerate(questions_and_answers, 1):
-        question = (qa.get("question") or "").strip()
-        answer = (qa.get("answer") or "").strip()
-        expected = (qa.get("expected_answer") or "").strip()
-        item = {
-            "index": i,
-            "question": question[:260],
-            "answer": answer[:520],
+    from database import get_db
+    from bson import ObjectId
+    from utils.helpers import utc_now
+    db = get_db()
+
+    # Retrieve stored matching configuration
+    stored_matching_doc = await db["app_settings"].find_one({"key": "stored_matching_enabled"})
+    stored_matching_enabled = stored_matching_doc.get("value", False) if stored_matching_doc else False
+
+    detailed_scores = [None] * len(questions_and_answers)
+    unmatched_indices = []
+
+    for index, qa in enumerate(questions_and_answers):
+        question_id = qa.get("question_id") or ""
+        if isinstance(question_id, bytes):
+            question_id = question_id.decode("utf-8")
+
+        answer = qa.get("answer") or ""
+        if isinstance(answer, bytes):
+            answer = answer.decode("utf-8")
+
+        matched = None
+        if stored_matching_enabled and question_id:
+            norm_ans = normalize_answer(answer)
+            matched = await db["approved_evaluations"].find_one({
+                "question_id": question_id,
+                "user_answer_normalized": norm_ans
+            })
+
+        if matched:
+            detailed_scores[index] = {
+                "question": qa.get("question", ""),
+                "answer": answer,
+                "score": matched.get("score", 50),
+                "feedback": matched.get("feedback", "Answer matches pre-approved evaluation criteria.")
+            }
+        else:
+            unmatched_indices.append(index)
+
+    # Evaluate any unmatched questions with Ollama
+    parsed = None
+    if unmatched_indices:
+        compact_qa = []
+        for temp_idx, orig_idx in enumerate(unmatched_indices, 1):
+            qa = questions_and_answers[orig_idx]
+            question = (qa.get("question") or "").strip()
+            answer = (qa.get("answer") or "").strip()
+            expected = (qa.get("expected_answer") or "").strip()
+            item = {
+                "index": temp_idx,
+                "question": question[:260],
+                "answer": answer[:520],
+            }
+            if expected:
+                item["reference_expected_answer"] = expected[:400]
+            compact_qa.append(item)
+
+        payload = {
+            "role_title": role_title,
+            "question_count": len(compact_qa),
+            "qa": compact_qa,
         }
-        if expected:
-            item["reference_expected_answer"] = expected[:400]
-        compact_qa.append(item)
 
-    payload = {
-        "role_title": role_title,
-        "question_count": len(compact_qa),
-        "qa": compact_qa,
-    }
-
-    prompt_template = PromptTemplate.from_template(
-        """You are a strict technical interviewer evaluating a candidate for role: {role_title}.
+        prompt_template = PromptTemplate.from_template(
+            """You are a strict technical interviewer evaluating a candidate for role: {role_title}.
 
 Input JSON:
 {payload}
@@ -1256,59 +1302,154 @@ Rules:
 - Do NOT echo full question or answer text in output.
 - Keep each feedback under 220 characters.
 """
-    )
-    prompt = prompt_template.format(
-        role_title=role_title,
-        payload=json.dumps(payload, ensure_ascii=True),
-    )
+        )
+        prompt = prompt_template.format(
+            role_title=role_title,
+            payload=json.dumps(payload, ensure_ascii=True),
+        )
 
-    parsed = None
-    try:
-        result = _extract_json_object(
-            await call_ollama(
-                prompt,
-                max_attempts=3,
-                request_timeout_seconds=45,
+        try:
+            result = _extract_json_object(
+                await call_ollama(
+                    prompt,
+                    max_attempts=3,
+                    request_timeout_seconds=45,
+                )
             )
-        )
-        parsed = json.loads(result)
-    except Exception:
-        parsed = None
+            parsed = json.loads(result)
+        except Exception:
+            parsed = None
 
-    score_map: dict[int, tuple[int, str]] = {}
-    if isinstance(parsed, dict):
-        for item in parsed.get("per_question", []) or []:
-            if not isinstance(item, dict):
-                continue
-            idx = item.get("index")
-            try:
-                index = int(idx)
-            except Exception:
-                continue
-            if index < 1 or index > len(questions_and_answers):
-                continue
-            score = _clamp_score(item.get("score"), _fallback_item_score(questions_and_answers[index - 1].get("answer", "")))
-            feedback = (item.get("feedback") or "").strip() or "Answer reviewed with focus on conceptual correctness."
-            score_map[index] = (score, feedback)
+        score_map: dict[int, tuple[int, str]] = {}
+        if isinstance(parsed, dict):
+            for item in parsed.get("per_question", []) or []:
+                if not isinstance(item, dict):
+                    continue
+                idx = item.get("index")
+                try:
+                    temp_index = int(idx)
+                except Exception:
+                    continue
+                if temp_index < 1 or temp_index > len(unmatched_indices):
+                    continue
+                orig_index = unmatched_indices[temp_index - 1]
+                score = _clamp_score(item.get("score"), _fallback_item_score(questions_and_answers[orig_index].get("answer", "")))
+                feedback = (item.get("feedback") or "").strip() or "Answer reviewed with focus on conceptual correctness."
+                score_map[orig_index] = (score, feedback)
 
-    detailed_scores = []
-    for index, qa in enumerate(questions_and_answers, 1):
-        fallback_score = _fallback_item_score(qa.get("answer", ""))
-        score, feedback = score_map.get(
-            index,
-            (fallback_score, "Could not derive detailed AI feedback for this answer; score based on response quality signals."),
-        )
-        detailed_scores.append(
-            {
+        for orig_idx in unmatched_indices:
+            qa = questions_and_answers[orig_idx]
+            fallback_score = _fallback_item_score(qa.get("answer", ""))
+            score, feedback = score_map.get(
+                orig_idx,
+                (fallback_score, "Could not derive detailed AI feedback for this answer; score based on response quality signals."),
+            )
+            detailed_scores[orig_idx] = {
                 "question": qa.get("question", ""),
                 "answer": qa.get("answer", ""),
                 "score": score,
                 "feedback": feedback,
             }
-        )
 
+            # Add to pending_evaluations
+            question_id = qa.get("question_id") or ""
+            if isinstance(question_id, bytes):
+                question_id = question_id.decode("utf-8")
+
+            raw_answer = qa.get("answer") or ""
+            if isinstance(raw_answer, bytes):
+                raw_answer = raw_answer.decode("utf-8")
+
+            original_answer = qa.get("original_answer") or ""
+            compacted_answer = qa.get("compacted_answer") or ""
+            if question_id and (not original_answer or not compacted_answer):
+                try:
+                    q_doc = await db["questions"].find_one({"_id": ObjectId(question_id)})
+                    if q_doc:
+                        original_answer = q_doc.get("original_answer") or original_answer
+                        compacted_answer = q_doc.get("compacted_answer") or compacted_answer
+                except Exception:
+                    pass
+
+            if question_id:
+                norm_ans = normalize_answer(raw_answer)
+                await db["pending_evaluations"].update_one(
+                    {
+                        "question_id": question_id,
+                        "user_answer_normalized": norm_ans
+                    },
+                    {
+                        "$setOnInsert": {
+                            "question_id": question_id,
+                            "question_text": qa.get("question", ""),
+                            "category": qa.get("category") or "general",
+                            "subtopic": qa.get("subtopic") or "",
+                            "user_answer": raw_answer,
+                            "user_answer_normalized": norm_ans,
+                            "original_answer": original_answer,
+                            "compacted_answer": compacted_answer,
+                            "llm_suggested_score": score,
+                            "llm_suggested_feedback": feedback,
+                            "created_at": utc_now()
+                        }
+                    },
+                    upsert=True
+                )
+
+    # Compute stats
+    fallback_overall = int(round(sum(item["score"] for item in detailed_scores) / max(1, len(detailed_scores))))
+
+    if not unmatched_indices:
+        # All matched! Skip LLM call and calculate local stats.
+        overall_score = fallback_overall
+        technical_score = fallback_overall
+        grammatical_score = 75
+
+        if overall_score >= 80:
+            strengths = [
+                "Demonstrated precise understanding of technical concepts",
+                "Delivered accurate definitions matching reference expectations"
+            ]
+            weaknesses = [
+                "No critical conceptual gaps identified during evaluation"
+            ]
+            recommendations = [
+                "Explore more complex production and edge-case scenarios for this topic"
+            ]
+        elif overall_score >= 50:
+            strengths = [
+                "Attempted responses showing fundamental knowledge of the topic"
+            ]
+            weaknesses = [
+                "Answers need additional technical depth and concrete terminology"
+            ]
+            recommendations = [
+                "Review core theoretical concepts and practice explaining the underlying mechanics"
+            ]
+        else:
+            strengths = [
+                "Attempted the discussion on the assigned questions"
+            ]
+            weaknesses = [
+                "Significant conceptual errors or incomplete explanations of core topics"
+            ]
+            recommendations = [
+                "Re-study basic fundamentals of the topics before retaking the interview"
+            ]
+
+        return {
+            "overall_score": overall_score,
+            "technical_score": technical_score,
+            "grammatical_score": grammatical_score,
+            "detailed_scores": detailed_scores,
+            "strengths": strengths,
+            "weaknesses": weaknesses,
+            "recommendations": recommendations,
+        }
+
+    # If some were LLM-evaluated
     if isinstance(parsed, dict):
-        overall_score = _clamp_score(parsed.get("overall_score"), int(round(sum(item["score"] for item in detailed_scores) / max(1, len(detailed_scores)))))
+        overall_score = _clamp_score(parsed.get("overall_score"), fallback_overall)
         technical_score = _clamp_score(parsed.get("technical_score"), overall_score)
         grammatical_score = _clamp_score(parsed.get("grammatical_score"), 75)
         strengths = [str(s).strip() for s in (parsed.get("strengths") or []) if str(s).strip()][:5]
@@ -1332,7 +1473,6 @@ Rules:
             "recommendations": recommendations,
         }
 
-    fallback_overall = int(round(sum(item["score"] for item in detailed_scores) / max(1, len(detailed_scores))))
     return {
         "overall_score": _clamp_score(fallback_overall, 50),
         "technical_score": _clamp_score(fallback_overall, 50),

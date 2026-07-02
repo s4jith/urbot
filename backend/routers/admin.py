@@ -13,6 +13,7 @@ from schemas.admin import (
     ChatbotQueryRequest, ChatbotExportRequest, ChatbotStudentUpdate,
     DepartmentCreate, MaintenanceModeUpdate, JoiningYearsUpdate,
     GeminiKeyCreate, GeminiKeyUpdate,
+    StoredMatchingUpdate, ApprovePendingAnswer, UpdateApprovedEvaluation,
 )
 from services.admin_service import (
     create_role, update_role, delete_role, list_roles,
@@ -26,6 +27,9 @@ from services.admin_service import (
     get_maintenance_status, set_maintenance_status,
     get_joining_years, set_joining_years,
     add_gemini_key, list_gemini_keys, update_gemini_key, delete_gemini_key,
+    get_app_setting, set_app_setting,
+    get_pending_evaluations_grouped, approve_pending_evaluation, delete_pending_evaluation,
+    get_approved_evaluations_grouped, update_approved_evaluation, delete_approved_evaluation,
 )
 from services.job_description_service import (
     create_job_description,
@@ -1032,4 +1036,83 @@ async def delete_gemini_key_endpoint(
     if not success:
         raise HTTPException(status_code=404, detail="Gemini API Key not found")
     return {"message": "Gemini API Key deleted"}
+
+
+# ─── Stored Matching & Answer Evaluation ───
+
+@router.get("/settings/stored-matching")
+async def get_stored_matching_endpoint(
+    current_user: dict = Depends(require_role("admin")),
+):
+    enabled = await get_app_setting("stored_matching_enabled", False)
+    return {"enabled": bool(enabled)}
+
+
+@router.patch("/settings/stored-matching")
+async def set_stored_matching_endpoint(
+    request: StoredMatchingUpdate,
+    current_user: dict = Depends(require_role("admin")),
+):
+    await set_app_setting("stored_matching_enabled", request.enabled)
+    return {"enabled": request.enabled}
+
+
+@router.get("/pending-evaluations")
+async def get_pending_evaluations_endpoint(
+    current_user: dict = Depends(require_role("admin")),
+):
+    return await get_pending_evaluations_grouped()
+
+
+@router.post("/pending-evaluations/{id}/approve")
+async def approve_pending_evaluation_endpoint(
+    id: str,
+    request: ApprovePendingAnswer,
+    current_user: dict = Depends(require_role("admin")),
+):
+    success = await approve_pending_evaluation(id_str=id, score=request.score, feedback=request.feedback)
+    if not success:
+        raise HTTPException(status_code=404, detail="Pending evaluation not found")
+    return {"message": "Approved and stored successfully"}
+
+
+@router.delete("/pending-evaluations/{id}")
+async def delete_pending_evaluation_endpoint(
+    id: str,
+    current_user: dict = Depends(require_role("admin")),
+):
+    success = await delete_pending_evaluation(id_str=id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Pending evaluation not found")
+    return {"message": "Pending answer dismissed"}
+
+
+@router.get("/approved-evaluations")
+async def get_approved_evaluations_endpoint(
+    current_user: dict = Depends(require_role("admin")),
+):
+    return await get_approved_evaluations_grouped()
+
+
+@router.put("/approved-evaluations/{id}")
+async def update_approved_evaluation_endpoint(
+    id: str,
+    request: UpdateApprovedEvaluation,
+    current_user: dict = Depends(require_role("admin")),
+):
+    success = await update_approved_evaluation(id_str=id, score=request.score, feedback=request.feedback)
+    if not success:
+        raise HTTPException(status_code=404, detail="Approved evaluation not found")
+    return {"message": "Approved evaluation updated successfully"}
+
+
+@router.delete("/approved-evaluations/{id}")
+async def delete_approved_evaluation_endpoint(
+    id: str,
+    current_user: dict = Depends(require_role("admin")),
+):
+    success = await delete_approved_evaluation(id_str=id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Approved evaluation not found")
+    return {"message": "Approved evaluation deleted successfully"}
 

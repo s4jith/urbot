@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect, useCallback } from "react";
 import Navbar from "@/components/Navbar";
@@ -34,6 +34,11 @@ export default function AdminSettingsPage() {
   const [yearsLoading, setYearsLoading] = useState(true);
   const [newYear, setNewYear] = useState("");
   const [yearsSaving, setYearsSaving] = useState(false);
+
+  // -- Stored Answer Matching -----------------------------------------
+  const [storedMatching, setStoredMatching] = useState(false);
+  const [matchingLoading, setMatchingLoading] = useState(true);
+  const [matchingSaving, setMatchingSaving] = useState(false);
 
   // â”€â”€ Load departments â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const fetchDepts = useCallback(async () => {
@@ -73,11 +78,24 @@ export default function AdminSettingsPage() {
     }
   }, []);
 
+  const fetchStoredMatching = useCallback(async () => {
+    setMatchingLoading(true);
+    try {
+      const { data } = await api.get("/admin/settings/stored-matching");
+      setStoredMatching(data.enabled);
+    } catch {
+      toast.error("Failed to load stored matching status");
+    } finally {
+      setMatchingLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchDepts();
     fetchMaintenance();
     fetchJoiningYears();
-  }, [fetchDepts, fetchMaintenance, fetchJoiningYears]);
+    fetchStoredMatching();
+  }, [fetchDepts, fetchMaintenance, fetchJoiningYears, fetchStoredMatching]);
 
   // â”€â”€ Create department â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async function handleCreateDept(e: React.FormEvent) {
@@ -174,6 +192,25 @@ export default function AdminSettingsPage() {
     }
   }
 
+  async function handleToggleStoredMatching() {
+    setMatchingSaving(true);
+    try {
+      const { data } = await api.patch("/admin/settings/stored-matching", {
+        enabled: !storedMatching,
+      });
+      setStoredMatching(data.enabled);
+      toast.success(
+        data.enabled
+          ? "Stored Answer Matching enabled"
+          : "Stored Answer Matching disabled"
+      );
+    } catch {
+      toast.error("Failed to update stored matching status");
+    } finally {
+      setMatchingSaving(false);
+    }
+  }
+
   return (
     <ProtectedRoute requiredRole="admin">
       <Navbar />
@@ -249,7 +286,46 @@ export default function AdminSettingsPage() {
           </div>
         </section>
 
-        {/* â”€â”€ Departments â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+        {/* ── Stored Answer Matching ── */}
+        <section className="app-panel">
+          <h2 className="text-lg font-semibold mb-4">Stored Answer Matching</h2>
+          {matchingLoading ? (
+            <div className="flex items-center gap-2 py-4">
+              <Loader2 className="w-5 h-5 animate-spin text-primary" />
+              <span className="text-sm text-muted-foreground">Loading matching status...</span>
+            </div>
+          ) : (
+            <div>
+              <p className="text-sm text-muted-foreground mb-5">
+                When enabled, evaluations will first match candidate answers against database-stored approved answers.
+                This eliminates LLM costs and ensures fast, consistent evaluation marks for recurring candidate answers.
+              </p>
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={handleToggleStoredMatching}
+                  disabled={matchingSaving || matchingLoading}
+                  className={`cursor-pointer px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 ${
+                    storedMatching
+                      ? "bg-green-600 hover:bg-green-700 text-white"
+                      : "bg-red-600 hover:bg-red-700 text-white"
+                  }`}
+                >
+                  {matchingSaving ? (
+                    <Loader2 className="w-4 h-4 animate-spin inline mr-1" />
+                  ) : null}
+                  {storedMatching ? "Disable Stored Matching" : "Enable Stored Matching"}
+                </button>
+                <span className="text-xs text-muted-foreground">
+                  {storedMatching
+                    ? "Stored Answer Matching is currently ACTIVE."
+                    : "Stored Answer Matching is INACTIVE (falling back entirely to Ollama LLM)."}
+                </span>
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* ── Departments ──────────────────────────────────────────────── */}
         <section className="app-panel">
           <h2 className="text-lg font-semibold mb-4">Departments</h2>
           <p className="text-sm text-muted-foreground mb-5">

@@ -841,3 +841,157 @@ async def delete_gemini_key(key_id: str) -> bool:
         return True
     return False
 
+
+async def get_pending_evaluations_grouped() -> dict:
+    db = get_db()
+    cursor = db["pending_evaluations"].find({}).sort([("category", 1), ("question_text", 1), ("created_at", 1)])
+    pending_list = await cursor.to_list(length=1000)
+
+    grouped = {}
+    for doc in pending_list:
+        category = (doc.get("category") or "General").strip()
+        q_id = str(doc.get("question_id") or "")
+        q_text = (doc.get("question_text") or "No question text").strip()
+        orig_ans = (doc.get("original_answer") or "").strip()
+        compact_ans = (doc.get("compacted_answer") or "").strip()
+
+        if category not in grouped:
+            grouped[category] = {"questions": {}}
+
+        if q_id not in grouped[category]["questions"]:
+            grouped[category]["questions"][q_id] = {
+                "question_id": q_id,
+                "question_text": q_text,
+                "original_answer": orig_ans,
+                "compacted_answer": compact_ans,
+                "answers": []
+            }
+
+        answer_entry = {
+            "id": str(doc["_id"]),
+            "user_answer": doc.get("user_answer", ""),
+            "llm_suggested_score": doc.get("llm_suggested_score"),
+            "llm_suggested_feedback": doc.get("llm_suggested_feedback")
+        }
+        grouped[category]["questions"][q_id]["answers"].append(answer_entry)
+
+    result = {}
+    for cat, val in grouped.items():
+        questions_list = list(val["questions"].values())
+        result[cat] = {"questions": questions_list}
+
+    return {"topics": result}
+
+
+async def approve_pending_evaluation(id_str: str, score: int, feedback: str) -> bool:
+    db = get_db()
+    pending = await db["pending_evaluations"].find_one({"_id": ObjectId(id_str)})
+    if not pending:
+        return False
+
+    q_id = pending.get("question_id")
+    raw_answer = pending.get("user_answer", "")
+    normalized_answer = pending.get("user_answer_normalized", "")
+
+    if not normalized_answer and raw_answer:
+        normalized_answer = " ".join(raw_answer.strip().lower().split())
+
+    await db["approved_evaluations"].update_one(
+        {
+            "question_id": q_id,
+            "user_answer_normalized": normalized_answer,
+        },
+        {
+            "$set": {
+                "question_id": q_id,
+                "user_answer": raw_answer,
+                "user_answer_normalized": normalized_answer,
+                "score": score,
+                "feedback": feedback,
+                "created_at": utc_now()
+            }
+        },
+        upsert=True
+    )
+
+    await db["pending_evaluations"].delete_one({"_id": ObjectId(id_str)})
+
+    if normalized_answer:
+        await db["pending_evaluations"].delete_many({
+            "question_id": q_id,
+            "user_answer_normalized": normalized_answer
+        })
+
+    return True
+
+
+async def delete_pending_evaluation(id_str: str) -> bool:
+    db = get_db()
+    result = await db["pending_evaluations"].delete_one({"_id": ObjectId(id_str)})
+    return result.deleted_count > 0
+
+
+async def get_approved_evaluations_grouped() -> dict:
+    db = get_db()
+    cursor = db["approved_evaluations"].find({}).sort([("created_at", -1)])
+    approved_list = await cursor.to_list(length=2000)
+
+    question_ids = list(set(doc.get("question_id") for doc in approved_list if doc.get("question_id")))
+    questions_map = {}
+    if question_ids:
+        # Fetch question details
+        q_cursor = db["questions"].find({"_id": {"$in": [ObjectId(qid) for qid in question_ids if ObjectId.is_valid(qid)]}})
+        async for q in q_cursor:
+            questions_map[str(q["_id"])] = q
+
+    grouped = {}
+    for doc in approved_list:
+        q_id = str(doc.get("question_id") or "")
+        q_info = questions_map.get(q_id, {})
+        category = (q_info.get("category") or "General").strip()
+        q_text = (q_info.get("question") or "No question text").strip()
+        orig_ans = (q_info.get("original_answer") or "").strip()
+        compact_ans = (q_info.get("compacted_answer") or "").strip()
+
+        if category not in grouped:
+            grouped[category] = {"questions": {}}
+
+        if q_id not in grouped[category]["questions"]:
+            grouped[category]["questions"][q_id] = {
+                "question_id": q_id,
+                "question_text": q_text,
+                "original_answer": orig_ans,
+                "compacted_answer": compact_ans,
+                "answers": []
+            }
+
+        answer_entry = {
+            "id": str(doc["_id"]),
+            "user_answer": doc.get("user_answer", ""),
+            "score": doc.get("score"),
+            "feedback": doc.get("feedback")
+        }
+        grouped[category]["questions"][q_id]["answers"].append(answer_entry)
+
+    result = {}
+    for cat, val in grouped.items():
+        questions_list = list(val["questions"].values())
+        result[cat] = {"questions": questions_list}
+
+    return {"topics": result}
+
+
+async def update_approved_evaluation(id_str: str, score: int, feedback: str) -> bool:
+    db = get_db()
+    result = await db["approved_evaluations"].update_one(
+        {"_id": ObjectId(id_str)},
+        {"$set": {"score": score, "feedback": feedback}}
+    )
+    return result.modified_count > 0
+
+
+async def delete_approved_evaluation(id_str: str) -> bool:
+    db = get_db()
+    result = await db["approved_evaluations"].delete_one({"_id": ObjectId(id_str)})
+    return result.deleted_count > 0
+

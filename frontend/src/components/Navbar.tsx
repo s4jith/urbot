@@ -19,6 +19,8 @@ import {
   Bot,
   Layers,
   MessageSquareDot,
+  ClipboardCheck,
+  CheckSquare,
 } from "lucide-react";
 import { getUser, logout } from "@/lib/auth";
 import { User } from "@/types";
@@ -109,7 +111,7 @@ export default function Navbar() {
               <NavLink href="/admin/group-tests" icon={Layers} label="Group Tests" />
               <NavLink href="/admin/chatbot" icon={MessageSquareDot} label="Student Filter" />
               <NavLink href="/admin/interviews" icon={Send} label="Make Interview" />
-              <NavLink href="/admin/reports" icon={FileText} label="Reports" />
+              <NavLink href="/admin/evaluations" icon={ClipboardCheck} label="Evaluation Answers" />
               <NavLink href="/admin/users" icon={Users} label="Users" />
               <NavLink href="/admin/settings" icon={Settings} label="Settings" />
             </div>
